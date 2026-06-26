@@ -1,0 +1,138 @@
+# Initial MVP sources. Replace or extend this list after the target site list is finalized.
+# Kinds:
+#   rss        RSS/Atom feed
+#   webpage    Article listing page, best-effort link extraction
+#   github     GitHub search API
+#   huggingface Hugging Face Hub API
+
+sources:
+  - id: openai-news
+    name: OpenAI News
+    kind: rss
+    url: https://openai.com/news/rss.xml
+    language: en
+    weight: 1.25
+    panel: authority
+    authority_tier: 1.0
+    enabled: true
+
+  - id: anthropic-news
+    name: Anthropic News
+    kind: webpage
+    url: https://www.anthropic.com/news
+    language: en
+    weight: 1.2
+    panel: authority
+    authority_tier: 1.0
+    enabled: true
+
+  - id: google-deepmind
+    name: Google DeepMind Blog
+    kind: rss
+    url: https://deepmind.google/blog/rss.xml
+    language: en
+    weight: 1.15
+    panel: authority
+    authority_tier: 1.0
+    enabled: true
+
+  - id: huggingface-blog
+    name: Hugging Face Blog
+    kind: rss
+    url: https://huggingface.co/blog/feed.xml
+    language: en
+    weight: 1.1
+    panel: authority
+    authority_tier: 0.9
+    enabled: true
+
+  - id: thenewstack
+    name: The New Stack
+    kind: webpage
+    url: https://thenewstack.io/
+    language: en
+    weight: 1.05
+    panel: curator
+    authority_tier: 0.75
+    enabled: true
+
+  - id: claude-blog
+    name: Claude Blog
+    kind: webpage
+    url: https://claude.com/blog
+    language: en
+    weight: 1.2
+    panel: authority
+    authority_tier: 1.0
+    enabled: true
+
+  - id: openai-developers-blog
+    name: OpenAI Developers Blog
+    kind: webpage
+    url: https://developers.openai.com/blog
+    language: en
+    weight: 1.2
+    panel: authority
+    authority_tier: 1.0
+    enabled: true
+
+  - id: pytorch-kr-blog
+    name: PyTorch Korea Blog
+    kind: webpage
+    url: https://pytorch.kr/blog/
+    language: ko
+    weight: 1.0
+    panel: authority
+    authority_tier: 0.85
+    enabled: true
+
+  - id: geeknews
+    name: GeekNews
+    kind: webpage
+    url: https://news.hada.io/
+    language: ko
+    weight: 1.0
+    panel: community
+    authority_tier: 0.65
+    enabled: true
+
+  - id: marktechpost
+    name: MarkTechPost
+    kind: webpage
+    url: https://www.marktechpost.com/
+    language: en
+    weight: 0.9
+    panel: curator
+    authority_tier: 0.55
+    enabled: true
+
+
+  - id: github-ai-trending
+    name: GitHub AI Repositories
+    kind: github
+    query: "topic:llm"
+    language: en
+    weight: 0.95
+    panel: developer
+    authority_tier: 0.65
+    enabled: true
+
+  - id: github-agent-trending
+    name: GitHub Agent Repositories
+    kind: github
+    query: "topic:ai-agent"
+    language: en
+    weight: 0.95
+    panel: developer
+    authority_tier: 0.65
+    enabled: true
+
+  - id: huggingface-models
+    name: Hugging Face Models
+    kind: huggingface
+    query: "text-generation"
+    language: en
+    weight: 0.9
+    panel: model-hub
+    authority_tier: 0.7
+    enabled: true
