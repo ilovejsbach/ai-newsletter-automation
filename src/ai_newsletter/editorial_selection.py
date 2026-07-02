@@ -95,10 +95,12 @@ def select_editorial_articles(
     # instead of being an all-foundation-model list.
     category_caps: dict[str, int] | None = None
     big_lab_cap: int | None = None
+    protect_top = 0
     if diversify:
         per_vendor_limit = min(per_vendor_limit, 2)
         category_caps = {"model": 3}
         big_lab_cap = max(1, (limit * 6) // 10)  # ~60% of the issue, rest = breadth
+        protect_top = max(1, (limit * 4) // 10)  # top ~40% by importance bypass caps
     pool = [a for a in deduplicate(candidates) if _is_publishable(a)]
     scored: list[RankedArticle]
     mode: str
@@ -129,6 +131,7 @@ def select_editorial_articles(
         per_vendor_limit=per_vendor_limit,
         category_caps=category_caps,
         big_lab_cap=big_lab_cap,
+        protect_top=protect_top,
     )
     if diversify:
         mode = mode + "-diverse"
@@ -151,6 +154,7 @@ def _pick_with_diversity(
     per_vendor_limit: int,
     category_caps: dict[str, int] | None = None,
     big_lab_cap: int | None = None,
+    protect_top: int = 0,
 ) -> list[RankedArticle]:
     category_caps = category_caps or {}
     selected: list[RankedArticle] = []
@@ -158,8 +162,35 @@ def _pick_with_diversity(
     vendor_counts: dict[str, int] = {}
     category_counts: dict[str, int] = {}
     big_lab_count = 0
+    protected_ids: set[str] = set()
+
+    def _admit(article: RankedArticle) -> None:
+        nonlocal big_lab_count
+        selected.append(article)
+        source_counts[article.source_id] = source_counts.get(article.source_id, 0) + 1
+        category = str(article.score_breakdown.get("category") or "other")
+        category_counts[category] = category_counts.get(category, 0) + 1
+        vendor = _vendor_of(article)
+        if vendor:
+            vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
+        if vendor in _BIG_LABS:
+            big_lab_count += 1
+
+    # First: the most important stories bypass vendor/category/big-lab caps so a
+    # genuinely major item (e.g. a flagship redeploy) is never dropped for diversity.
+    # `ranked` is already sorted by importance desc. per_source_limit still applies.
+    for article in ranked[:protect_top]:
+        if source_counts.get(article.source_id, 0) >= per_source_limit:
+            continue
+        protected_ids.add(article.id)
+        _admit(article)
+        if len(selected) >= limit:
+            return selected
+
     deferred: list[RankedArticle] = []
     for article in ranked:
+        if article.id in protected_ids:
+            continue
         vendor = _vendor_of(article)
         category = str(article.score_breakdown.get("category") or "other")
         if source_counts.get(article.source_id, 0) >= per_source_limit:
@@ -173,13 +204,7 @@ def _pick_with_diversity(
         if big_lab_cap is not None and vendor in _BIG_LABS and big_lab_count >= big_lab_cap:
             deferred.append(article)
             continue
-        selected.append(article)
-        source_counts[article.source_id] = source_counts.get(article.source_id, 0) + 1
-        category_counts[category] = category_counts.get(category, 0) + 1
-        if vendor:
-            vendor_counts[vendor] = vendor_counts.get(vendor, 0) + 1
-        if vendor in _BIG_LABS:
-            big_lab_count += 1
+        _admit(article)
         if len(selected) >= limit:
             return selected
     # If diversity caps left us short, backfill from deferred/high-score remainder
