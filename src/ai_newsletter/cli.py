@@ -9,6 +9,7 @@ from rich.console import Console
 
 from .collectors import Collector
 from .config import load_environment, load_sources
+from .editorial_selection import select_editorial_articles
 from .latest_selection import default_latest_source_ids, latest_quality_report, select_latest_articles
 from .llm import enrich_with_openai, evaluate_with_openai
 from .models import CollectionOptions
@@ -28,9 +29,11 @@ def build(
     days: int = typer.Option(7, min=1, max=31, help="Collection window in days."),
     limit: int = typer.Option(10, min=1, max=30, help="Number of main articles."),
     use_llm: bool = typer.Option(True, help="Use OpenAI for Korean editing and quality evaluation."),
-    selection_mode: Literal["issue", "rank", "latest"] = typer.Option(
+    selection_mode: Literal["issue", "rank", "latest", "editorial", "editorial-diverse"] = typer.Option(
         "issue",
-        help="Article selection mode: issue radar, legacy ranking, or latest dated articles from listed sites.",
+        help="Article selection mode: issue radar, legacy ranking, latest dated articles, "
+        "editorial (LLM newsworthiness + topic dedup), or editorial-diverse (adds "
+        "category/vendor diversity so it is not all foundation-model news).",
     ),
     issue_radar: bool = typer.Option(True, help="Select articles through issue radar first."),
     latest_source_ids: str = typer.Option(
@@ -50,6 +53,8 @@ def build(
     if selection_mode == "latest":
         require_dates = True
         strict_week = True
+        issue_radar = False
+    if selection_mode in ("editorial", "editorial-diverse"):
         issue_radar = False
     collector = Collector(
         options=CollectionOptions(
@@ -92,6 +97,13 @@ def build(
             source_ids=source_ids,
             fallback_source_ids=fallback_source_ids,
             days=days,
+        )
+    elif selection_mode in ("editorial", "editorial-diverse"):
+        selected, report = select_editorial_articles(
+            candidates,
+            limit=limit,
+            use_llm=use_llm,
+            diversify=(selection_mode == "editorial-diverse"),
         )
     elif selection_mode == "rank" or not issue_radar:
         selected = rank_articles(candidates, limit=limit)

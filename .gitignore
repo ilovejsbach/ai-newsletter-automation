@@ -5,4 +5,7 @@ __pycache__/
 .DS_Store
 outputs/
 outputs_sample_check/
+outputs_latest/
+out*/
+_diag_images/
 .pytest_cache/

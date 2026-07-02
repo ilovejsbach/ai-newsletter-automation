@@ -106,6 +106,16 @@ sources:
     authority_tier: 0.55
     enabled: true
 
+  - id: alphasignal
+    name: AlphaSignal
+    kind: rss
+    url: https://alphasignalai.substack.com/feed
+    language: en
+    weight: 1.0
+    panel: curator
+    authority_tier: 0.7
+    enabled: true
+
 
   - id: github-ai-trending
     name: GitHub AI Repositories
