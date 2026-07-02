@@ -3,6 +3,7 @@
 주간 AI 동향/뉴스를 수집하고, 중요도 평가를 거쳐, 내부망 반입용 HTML 패키지를 생성하는 MVP입니다.
 
 > 📦 **설치는 [docs/INSTALL.md](docs/INSTALL.md)를 따르세요** — Mac/Windows 공통, 사내망 SSL·인증 등 겪은 문제까지 정리돼 있습니다.
+> 🪟 **아무것도 안 깔린 새 Windows PC**는 [0.5 콜드스타트](docs/INSTALL.md#05-windows-완전-초기-pc--콜드스타트-아무것도-없는-경우-여기부터) — `scripts/bootstrap_windows.ps1` 한 번으로 git·gh·uv 설치와 PATH·SSL 설정을 끝냅니다.
 > 🧭 선별 모드 비교는 [docs/SELECTION_MODES.md](docs/SELECTION_MODES.md), 운영/게시는 [docs/WINDOWS_UIPATH_RUNBOOK.md](docs/WINDOWS_UIPATH_RUNBOOK.md)를 보세요.
 
 ## 목표

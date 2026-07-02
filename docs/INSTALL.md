@@ -24,6 +24,58 @@
 
 ---
 
+## 0.5 Windows 완전 초기 PC — 콜드스타트 (아무것도 없는 경우 여기부터)
+
+> **파이썬도, git도, 아무것도 안 깔린 새 Windows PC**를 기준으로 한 절차입니다. 순서를 그대로 지키면 시행착오가 없습니다.
+> 아래 1~9번 상세 절차의 준비 단계를 **하나의 스크립트로 자동화**한 것이 `scripts/bootstrap_windows.ps1`입니다.
+
+### 반드시 지킬 3가지 (여기서 대부분 애를 먹습니다)
+
+1. **`cmd`가 아니라 `PowerShell`을 쓰세요.**
+   - 시작 메뉴 → "PowerShell" → 실행. (이 매뉴얼의 명령은 PowerShell 기준입니다.)
+   - `cmd`에서 `& "...\gh.exe"` 같은 명령은 `&은(는) 예상되지 않았습니다` 오류가 납니다. `&`는 PowerShell 전용입니다.
+
+2. **실행 정책(ExecutionPolicy)** — 스크립트 실행이 기본 차단돼 있습니다. 둘 중 하나:
+   - 매번: `powershell -ExecutionPolicy Bypass -File <스크립트>` (권장, 시스템 설정 안 바꿈)
+   - 영구: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` (한 번만)
+
+3. **winget으로 설치한 직후엔 그 창에서 명령이 안 잡힙니다 (PATH 미갱신).**
+   - 가장 확실한 해결: **새 PowerShell 창을 연다.**
+   - 창을 유지해야 하면 아래로 현재 세션 PATH를 갱신:
+     ```powershell
+     $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+     ```
+   - `bootstrap_windows.ps1`은 이 PATH 갱신을 자동으로 처리합니다.
+
+### 원스텝: 부트스트랩 스크립트
+
+이 스크립트가 **git · GitHub CLI · uv 설치 + PATH 갱신 + git/uv의 사내 SSL 설정**까지 한 번에 합니다. 멱등(여러 번 실행해도 안전)입니다.
+
+**저장소를 이미 받았다면** (또는 스크립트 파일이 손에 있다면):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap_windows.ps1
+```
+
+**아직 아무것도 없다면** (git이 없어 clone도 못 하는 상태) — 스크립트 파일 하나만 먼저 확보:
+1. 브라우저로 레포의 `scripts/bootstrap_windows.ps1` 열기 → **Raw** → 다른 이름으로 저장 (예: `C:\bootstrap_windows.ps1`)
+2. 실행:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File C:\bootstrap_windows.ps1
+   ```
+3. 끝나면 스크립트가 출력한 **NEXT STEPS**(gh 인증 → clone → uv sync → setup_windows.ps1)를 따릅니다.
+
+부트스트랩이 하는 일:
+- winget 존재 확인
+- `git` / `gh` / `uv` 설치 (이미 있으면 건너뜀)
+- 현재 세션 PATH 갱신 (설치 직후 바로 사용 가능)
+- **git이 Windows 인증서 저장소를 쓰도록** `http.sslBackend=schannel` 설정 → 사내망에서 HTTPS clone 성공
+- **`UV_SYSTEM_CERTS=true`** 설정 → uv 다운로드 SSL 통과
+- 다음 단계 안내 출력
+
+부트스트랩 이후에는 아래 **2번(gh 인증·clone) → 5번(uv sync) → 4번(setup_windows.ps1 인증서) → 6번(.env)** 순서로 진행하면 됩니다.
+
+---
+
 ## 1. 사전 준비물
 
 ### 공통
@@ -41,6 +93,11 @@
 ---
 
 ## 2. 코드 받기
+
+> **사내망에서 `git clone`이 SSL 오류(`SSL certificate problem`)로 실패하면**, git이 Windows 인증서 저장소를 쓰도록 한 번 설정하세요 (부트스트랩 스크립트는 자동 적용):
+> ```powershell
+> git config --global http.sslBackend schannel
+> ```
 
 ### 공개 저장소
 ```bash
