@@ -2,6 +2,9 @@
 
 주간 AI 동향/뉴스를 수집하고, 중요도 평가를 거쳐, 내부망 반입용 HTML 패키지를 생성하는 MVP입니다.
 
+> 📦 **설치는 [docs/INSTALL.md](docs/INSTALL.md)를 따르세요** — Mac/Windows 공통, 사내망 SSL·인증 등 겪은 문제까지 정리돼 있습니다.
+> 🧭 선별 모드 비교는 [docs/SELECTION_MODES.md](docs/SELECTION_MODES.md), 운영/게시는 [docs/WINDOWS_UIPATH_RUNBOOK.md](docs/WINDOWS_UIPATH_RUNBOOK.md)를 보세요.
+
 ## 목표
 
 - 최근 7일 AI 뉴스/블로그/모델/오픈소스 후보 수집
