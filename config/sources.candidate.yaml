@@ -1,0 +1,108 @@
+# Candidate sources — under evaluation, NOT yet part of the production set.
+# Load alongside config/sources.yaml with:  ai-newsletter build --include-candidates
+# Sources here are tagged source_set: candidate. In `consensus` mode, a topic that
+# is covered by BOTH a main source and a candidate source gets a cross-set bonus,
+# which shows which candidates actually corroborate established coverage.
+# Promote a proven source by moving its entry into config/sources.yaml.
+
+sources:
+  # --- International AI media (RSS verified) ---
+  - id: the-decoder
+    name: The Decoder
+    kind: rss
+    url: https://the-decoder.com/feed/
+    language: en
+    weight: 1.0
+    panel: curator
+    authority_tier: 0.7
+    source_set: candidate
+    enabled: true
+
+  - id: techcrunch-ai
+    name: TechCrunch AI
+    kind: rss
+    url: https://techcrunch.com/category/artificial-intelligence/feed/
+    language: en
+    weight: 1.0
+    panel: curator
+    authority_tier: 0.7
+    source_set: candidate
+    enabled: true
+
+  - id: arstechnica-ai
+    name: Ars Technica AI
+    kind: rss
+    url: https://arstechnica.com/ai/feed/
+    language: en
+    weight: 1.0
+    panel: curator
+    authority_tier: 0.7
+    source_set: candidate
+    enabled: true
+
+  - id: mit-tech-review-ai
+    name: MIT Technology Review AI
+    kind: rss
+    url: https://www.technologyreview.com/topic/artificial-intelligence/feed/
+    language: en
+    weight: 1.05
+    panel: authority
+    authority_tier: 0.85
+    source_set: candidate
+    enabled: true
+
+  - id: theverge-ai
+    name: The Verge AI
+    kind: rss
+    url: https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+    language: en
+    weight: 0.9
+    panel: curator
+    authority_tier: 0.6
+    source_set: candidate
+    enabled: true
+
+  - id: latent-space
+    name: Latent Space
+    kind: rss
+    url: https://www.latent.space/feed
+    language: en
+    weight: 0.95
+    panel: developer
+    authority_tier: 0.65
+    source_set: candidate
+    enabled: true
+
+  # --- Korean AI media (RSS verified) ---
+  - id: aitimes-com
+    name: AI타임즈
+    kind: rss
+    url: https://www.aitimes.com/rss/allArticle.xml
+    language: ko
+    weight: 0.95
+    panel: curator
+    authority_tier: 0.6
+    source_set: candidate
+    enabled: true
+
+  - id: aitimes-kr
+    name: 인공지능신문
+    kind: rss
+    url: https://www.aitimes.kr/rss/allArticle.xml
+    language: ko
+    weight: 0.9
+    panel: curator
+    authority_tier: 0.55
+    source_set: candidate
+    enabled: true
+
+  - id: theai-kr
+    name: THE AI
+    kind: rss
+    url: https://www.newstheai.com/rss/allArticle.xml
+    language: ko
+    weight: 0.95
+    panel: curator
+    authority_tier: 0.6
+    source_set: candidate
+    enabled: true

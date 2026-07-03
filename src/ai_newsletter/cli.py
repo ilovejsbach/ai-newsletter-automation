@@ -9,7 +9,7 @@ from rich.console import Console
 
 from .collectors import Collector
 from .config import load_environment, load_sources
-from .editorial_selection import select_editorial_articles
+from .editorial_selection import select_consensus_articles, select_editorial_articles
 from .latest_selection import default_latest_source_ids, latest_quality_report, select_latest_articles
 from .llm import enrich_with_openai, evaluate_with_openai
 from .models import CollectionOptions
@@ -26,6 +26,7 @@ MODE_CHOICES: list[tuple[str, str]] = [
     ("latest", "최신 사이트 — 지정 사이트의 최근 1주 기사"),
     ("editorial", "편집자 — LLM 뉴스가치 채점 + 주제 중복제거"),
     ("editorial-diverse", "편집자+다양성 — 파운데이션 모델 쏠림 완화"),
+    ("consensus", "중복도 — 여러 출처가 함께 다룬 화제 우선"),
     ("rank", "레거시 랭킹 — 순수 점수 정렬"),
 ]
 
@@ -64,11 +65,13 @@ def build(
     days: int = typer.Option(7, min=1, max=31, help="Collection window in days."),
     limit: int = typer.Option(10, min=1, max=30, help="Number of main articles."),
     use_llm: bool = typer.Option(True, help="Use OpenAI for Korean editing and quality evaluation."),
-    selection_mode: Literal["issue", "rank", "latest", "editorial", "editorial-diverse"] = typer.Option(
+    selection_mode: Literal[
+        "issue", "rank", "latest", "editorial", "editorial-diverse", "consensus"
+    ] = typer.Option(
         "issue",
         help="Article selection mode: issue radar, legacy ranking, latest dated articles, "
-        "editorial (LLM newsworthiness + topic dedup), or editorial-diverse (adds "
-        "category/vendor diversity so it is not all foundation-model news).",
+        "editorial (LLM newsworthiness + topic dedup), editorial-diverse (adds "
+        "category/vendor diversity), or consensus (rank by how many sources cover the story).",
     ),
     issue_radar: bool = typer.Option(True, help="Select articles through issue radar first."),
     latest_source_ids: str = typer.Option(
@@ -82,6 +85,12 @@ def build(
     require_dates: bool = typer.Option(True, help="Drop items when no date can be parsed."),
     strict_week: bool = typer.Option(True, help="Drop items outside the collection window."),
     per_source_limit: int = typer.Option(20, min=1, max=100, help="Maximum candidate items per source."),
+    include_candidates: bool = typer.Option(
+        False, help="Also load config/sources.candidate.yaml (tagged as the 'candidate' set)."
+    ),
+    candidate_sources: Path = typer.Option(
+        Path("config/sources.candidate.yaml"), help="Candidate source YAML for --include-candidates."
+    ),
 ) -> None:
     """Collect, select, and render the weekly newsletter with explicit flags."""
     _run_build(
@@ -98,6 +107,8 @@ def build(
         require_dates=require_dates,
         strict_week=strict_week,
         per_source_limit=per_source_limit,
+        include_candidates=include_candidates,
+        candidate_sources=candidate_sources,
     )
 
 
@@ -116,14 +127,29 @@ def _run_build(
     require_dates: bool,
     strict_week: bool,
     per_source_limit: int,
+    include_candidates: bool = False,
+    candidate_sources: Path = Path("config/sources.candidate.yaml"),
 ) -> None:
     load_environment(env_file)
     source_list = load_sources(sources)
+    all_sources = list(source_list.sources)
+    if include_candidates and candidate_sources and candidate_sources.exists():
+        candidate_list = load_sources(candidate_sources)
+        existing_ids = {s.id for s in all_sources}
+        added = 0
+        for s in candidate_list.sources:
+            s.source_set = "candidate"
+            if s.id not in existing_ids:
+                all_sources.append(s)
+                existing_ids.add(s.id)
+                added += 1
+        console.print(f"[cyan]후보 소스 {added}개 포함 (candidate set)[/cyan]")
+    source_sets = {s.id: s.source_set for s in all_sources}
     if selection_mode == "latest":
         require_dates = True
         strict_week = True
         issue_radar = False
-    if selection_mode in ("editorial", "editorial-diverse"):
+    if selection_mode in ("editorial", "editorial-diverse", "consensus"):
         issue_radar = False
     collector = Collector(
         options=CollectionOptions(
@@ -134,7 +160,7 @@ def _run_build(
     )
     candidates = []
     try:
-        for source in source_list.sources:
+        for source in all_sources:
             if not source.enabled:
                 continue
             try:
@@ -148,13 +174,13 @@ def _run_build(
 
     issues = []
     if selection_mode == "latest":
-        source_ids = _parse_source_ids(latest_source_ids) or default_latest_source_ids(source_list.sources)
+        source_ids = _parse_source_ids(latest_source_ids) or default_latest_source_ids(all_sources)
         fallback_source_ids = (
-            default_latest_source_ids(source_list.sources) - source_ids if latest_fill else set()
+            default_latest_source_ids(all_sources) - source_ids if latest_fill else set()
         )
         selected = select_latest_articles(
             candidates,
-            source_list.sources,
+            all_sources,
             days=days,
             limit=limit,
             source_ids=source_ids,
@@ -173,6 +199,10 @@ def _run_build(
             limit=limit,
             use_llm=use_llm,
             diversify=(selection_mode == "editorial-diverse"),
+        )
+    elif selection_mode == "consensus":
+        selected, report = select_consensus_articles(
+            candidates, limit=limit, use_llm=use_llm, source_sets=source_sets
         )
     elif selection_mode == "rank" or not issue_radar:
         selected = rank_articles(candidates, limit=limit)
@@ -238,12 +268,16 @@ def _interactive() -> None:
         )
         latest_fill = Confirm.ask("지정 사이트에서 부족하면 다른 사이트로 보강할까요?", default=True)
 
+    include_candidates = Confirm.ask(
+        "후보 소스(config/sources.candidate.yaml)도 포함할까요?", default=False
+    )
+
     output = Prompt.ask("출력 폴더", default="outputs")
 
     console.print("\n[bold]설정 요약[/bold]")
     console.print(
         f"  모드=[cyan]{selection_mode}[/cyan]  기간={days}일  기사수={limit}  "
-        f"LLM={'예' if use_llm else '아니오'}  출력={output}"
+        f"LLM={'예' if use_llm else '아니오'}  후보소스={'예' if include_candidates else '아니오'}  출력={output}"
     )
     if selection_mode == "latest" and latest_source_ids:
         console.print(f"  지정 사이트={latest_source_ids}  보강={'예' if latest_fill else '아니오'}")
@@ -266,6 +300,7 @@ def _interactive() -> None:
         require_dates=True,
         strict_week=True,
         per_source_limit=20,
+        include_candidates=include_candidates,
     )
 
 
