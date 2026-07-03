@@ -157,7 +157,9 @@ uv --version
 ## 4. 사내망 SSL (회사 네트워크 — Windows 필수)
 
 회사 네트워크가 SSL을 검사(DLP/프록시)하면, 파이썬·uv가 회사 루트 인증서를 몰라서
-`invalid peer certificate: UnknownIssuer` / `APIConnectionError` 로 실패합니다. **가정용/일반 인터넷에서는 이 절이 필요 없습니다.**
+`invalid peer certificate: UnknownIssuer` / `APIConnectionError` / `CERTIFICATE_VERIFY_FAILED (self-signed certificate in certificate chain)` 로 실패합니다. **가정용/일반 인터넷에서는 이 절이 필요 없습니다.**
+
+> **앱의 파이썬 TLS(수집·OpenAI)는 이제 자동 처리됩니다.** 의존성에 `truststore`가 포함되어 있어, CLI가 시작할 때 Windows 인증서 저장소를 그대로 사용합니다. 따라서 `uv sync`가 certifi를 새로 설치해도(파이썬 버전 교체 등) OpenAI/수집 호출은 계속 회사 CA를 신뢰합니다 — **아래 4-2 certifi 수동 패치는 이제 폴백일 뿐**입니다. 남는 필수 설정은 **4-1(uv 다운로드용 `UV_SYSTEM_CERTS`)** 과, clone용 **git `schannel`**([2번](#2-코드-받기)) 입니다.
 
 ### 자동 (권장)
 저장소에 포함된 스크립트가 아래 4-1, 4-2를 자동으로 처리합니다. **`uv sync`로 `.venv`를 만든 뒤** 실행하세요:

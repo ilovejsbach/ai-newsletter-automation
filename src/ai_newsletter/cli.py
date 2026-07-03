@@ -30,6 +30,20 @@ MODE_CHOICES: list[tuple[str, str]] = [
 ]
 
 
+def _enable_os_trust_store() -> None:
+    """Make Python's TLS use the OS certificate store so corporate/self-signed
+    root CAs (e.g. an SSL-inspecting proxy) are trusted. This survives `uv sync`
+    reinstalling certifi, unlike patching the certifi bundle by hand. No-op if
+    truststore is unavailable (e.g. a minimal install) — falls back to certifi.
+    """
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
+
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context) -> None:
     """AI 주간 뉴스레터 생성기.
@@ -37,6 +51,7 @@ def main(ctx: typer.Context) -> None:
     하위 명령 없이 실행하면 대화형 모드로 진입합니다. 플래그로 직접 지정하려면
     'build'를, 샘플은 'sample'을 사용하세요.
     """
+    _enable_os_trust_store()
     if ctx.invoked_subcommand is None:
         _interactive()
 
