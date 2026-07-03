@@ -3,9 +3,12 @@
   Windows / corporate-network setup helper for ai-newsletter-automation.
 
 .DESCRIPTION
-  Automates the environment fixes needed behind an SSL-inspecting corporate
-  proxy (e.g. a DLP root CA), which otherwise break `uv` downloads and OpenAI
-  calls. Safe to run repeatedly (idempotent) and backs up the certifi bundle.
+  FALLBACK helper. The app now trusts the OS certificate store at runtime via
+  the `truststore` dependency, and `UV_SYSTEM_CERTS` is set by the bootstrap
+  script, so you usually do NOT need to run this. Run it only if TLS/SSL errors
+  persist behind an SSL-inspecting corporate proxy (e.g. a DLP root CA): it
+  patches the venv certifi bundle as a belt-and-suspenders fallback.
+  Safe to run repeatedly (idempotent) and backs up the certifi bundle.
 
   Run AFTER `uv sync` has created the .venv:
       powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1

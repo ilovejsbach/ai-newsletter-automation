@@ -72,7 +72,7 @@ powershell -ExecutionPolicy Bypass -File scripts\bootstrap_windows.ps1
 - **`UV_SYSTEM_CERTS=true`** 설정 → uv 다운로드 SSL 통과
 - 다음 단계 안내 출력
 
-부트스트랩 이후에는 아래 **2번(gh 인증·clone) → 5번(uv sync) → 4번(setup_windows.ps1 인증서) → 6번(.env)** 순서로 진행하면 됩니다.
+부트스트랩 이후에는 아래 **2번(gh 인증·clone) → 5번(uv sync) → 6번(.env) → 8번(검증)** 순서로 진행하면 됩니다. 앱의 파이썬 TLS(수집·OpenAI)는 `truststore`로 자동 처리되므로 **4번의 certifi 수동 패치(`setup_windows.ps1`)는 대개 필요 없습니다** — SSL 오류가 계속될 때만 폴백으로 실행하세요.
 
 ---
 
@@ -161,8 +161,8 @@ uv --version
 
 > **앱의 파이썬 TLS(수집·OpenAI)는 이제 자동 처리됩니다.** 의존성에 `truststore`가 포함되어 있어, CLI가 시작할 때 Windows 인증서 저장소를 그대로 사용합니다. 따라서 `uv sync`가 certifi를 새로 설치해도(파이썬 버전 교체 등) OpenAI/수집 호출은 계속 회사 CA를 신뢰합니다 — **아래 4-2 certifi 수동 패치는 이제 폴백일 뿐**입니다. 남는 필수 설정은 **4-1(uv 다운로드용 `UV_SYSTEM_CERTS`)** 과, clone용 **git `schannel`**([2번](#2-코드-받기)) 입니다.
 
-### 자동 (권장)
-저장소에 포함된 스크립트가 아래 4-1, 4-2를 자동으로 처리합니다. **`uv sync`로 `.venv`를 만든 뒤** 실행하세요:
+### 폴백 스크립트 (필요 시)
+보통은 `truststore`가 앱 TLS를 처리하고, `UV_SYSTEM_CERTS`는 부트스트랩에서 설정되므로 **이 스크립트를 실행할 필요가 없습니다.** 그래도 SSL 오류가 남으면, 저장소의 스크립트가 4-1·4-2를 한 번에 처리합니다. **`uv sync`로 `.venv`를 만든 뒤** 실행하세요:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1
 ```
@@ -283,7 +283,7 @@ uv run ai-newsletter build --days 7 --limit 10  # OpenAI로 한국어 편집(키
 | `missing required scope 'read:org'` | 토큰 권한 부족 | 토큰에 `repo` + `read:org` 둘 다 체크 |
 | `uv sync` → `invalid peer certificate: UnknownIssuer` | 사내 SSL 검사(회사 루트 CA 미신뢰) | `UV_SYSTEM_CERTS=true` ([4-1](#4-사내망-ssl-회사-네트워크-필수)) |
 | `Missing expected target directory for Python minor version link` | Windows 심볼릭 링크 권한 | python.exe 직접 지정 또는 개발자 모드 ([5](#5-의존성-설치-uv-sync)) |
-| OpenAI 호출 시 `APIConnectionError` | httpx가 회사 CA 미신뢰 | certifi에 회사 CA 추가 ([4-2](#4-사내망-ssl-회사-네트워크-필수)) |
+| OpenAI 호출 시 `APIConnectionError` / `CERTIFICATE_VERIFY_FAILED` | Python이 회사 CA 미신뢰 | `truststore`가 자동 처리(기본 포함). 그래도 나면 `scripts/setup_windows.ps1` 폴백([4-2](#4-사내망-ssl-회사-네트워크-필수)) |
 | 뉴스레터 이미지가 일부/전부 없음 | 브라우저 미설치 또는 og:image 없음 | Chrome/Edge 설치([7](#7-이미지-캡처용-브라우저)) |
 | `pytest` 플러그인 충돌(Windows) | 외부 pytest 플러그인 자동 로드 | `$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` 후 재실행 |
 
