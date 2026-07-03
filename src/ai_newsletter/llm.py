@@ -6,6 +6,7 @@ import os
 from openai import OpenAI
 
 from .models import RankedArticle
+from .usage import usage
 
 
 def enrich_with_openai(articles: list[RankedArticle]) -> list[RankedArticle]:
@@ -63,6 +64,7 @@ def enrich_with_openai(articles: list[RankedArticle]) -> list[RankedArticle]:
         input=prompt,
         text={"format": {"type": "json_object"}},
     )
+    usage.record(response)
     try:
         data = json.loads(response.output_text)
         rows = _extract_rows(data)
@@ -141,6 +143,7 @@ def _enrich_one(client: OpenAI, model: str, index: int, article: RankedArticle) 
             input=prompt,
             text={"format": {"type": "json_object"}},
         )
+        usage.record(response)
         rows = _extract_rows(json.loads(response.output_text))
     except Exception:
         return
@@ -237,6 +240,7 @@ def evaluate_with_openai(articles: list[RankedArticle], report: dict[str, object
         input=prompt,
         text={"format": {"type": "json_object"}},
     )
+    usage.record(response)
     try:
         report["llm_evaluation"] = json.loads(response.output_text)
     except Exception:

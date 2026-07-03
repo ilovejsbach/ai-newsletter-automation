@@ -19,6 +19,7 @@ from openai import OpenAI
 
 from .models import Article, RankedArticle
 from .ranking import deduplicate, score_article
+from .usage import usage
 
 # Heuristic entity patterns used for topic keys when the LLM is unavailable.
 _ENTITY_PATTERNS = [
@@ -367,6 +368,7 @@ def _llm_score(pool: list[Article]) -> list[RankedArticle]:
             input=prompt,
             text={"format": {"type": "json_object"}},
         )
+        usage.record(response)
         data = json.loads(response.output_text)
     except Exception:
         return []
