@@ -30,6 +30,17 @@ MODE_CHOICES: list[tuple[str, str]] = [
 ]
 
 
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context) -> None:
+    """AI 주간 뉴스레터 생성기.
+
+    하위 명령 없이 실행하면 대화형 모드로 진입합니다. 플래그로 직접 지정하려면
+    'build'를, 샘플은 'sample'을 사용하세요.
+    """
+    if ctx.invoked_subcommand is None:
+        _interactive()
+
+
 @app.command()
 def build(
     sources: Path = typer.Option(Path("config/sources.yaml"), help="Source configuration YAML."),
@@ -172,8 +183,7 @@ def _parse_source_ids(value: str) -> set[str]:
     return {item.strip() for item in value.split(",") if item.strip()}
 
 
-@app.command()
-def interactive() -> None:
+def _interactive() -> None:
     """대화형으로 옵션을 골라 주간 뉴스레터를 생성합니다 (플래그를 외울 필요 없음)."""
     import os
 

@@ -254,13 +254,13 @@ CRITIC_MODEL=gpt-5.4-mini
 ```bash
 uv run pytest                                   # 테스트 통과 확인
 uv run ai-newsletter sample                     # 키 없이 샘플 산출물 생성
-uv run ai-newsletter interactive                # 대화형: 옵션을 물어보며 생성(플래그 불필요)
+uv run ai-newsletter                            # 대화형: 옵션을 물어보며 생성(하위 명령 없이 실행)
 uv run ai-newsletter build --days 7 --limit 10 --no-use-llm   # LLM 없이 실제 수집
 uv run ai-newsletter build --days 7 --limit 10  # OpenAI로 한국어 편집(키 필요)
 ```
 `outputs/<날짜>_weekly_ai_newsletter/newsletter.html`이 생성되면 성공입니다.
 
-> 플래그를 외우기 번거로우면 **`uv run ai-newsletter interactive`** 를 쓰세요. 선별 모드·기간·기사 수·LLM 사용 여부를 차례로 물어보고, 요약을 확인한 뒤 생성합니다.
+> **하위 명령 없이 `uv run ai-newsletter`만 실행하면 대화형 모드**로 들어갑니다. 선별 모드·기간·기사 수·LLM 사용 여부를 차례로 물어보고, 요약을 확인한 뒤 생성합니다. 플래그로 직접 지정하거나 자동화(UiPath)에는 `build`를 씁니다.
 
 선별 모드는 4가지 중 선택할 수 있습니다(자세한 비교는 [SELECTION_MODES.md](SELECTION_MODES.md)):
 ```bash
