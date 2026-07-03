@@ -18,6 +18,7 @@
 
 ```bash
 uv sync
+uv run ai-newsletter interactive     # 대화형: 옵션을 물어보며 생성 (플래그 불필요)
 uv run ai-newsletter sample
 uv run ai-newsletter build --days 7 --limit 10
 uv run ai-newsletter build --days 7 --limit 10 --env-file /Users/koscom/workspace/koscom_report/.env
