@@ -17,7 +17,15 @@
 ## 실행
 
 ```bash
+# 1) 프로젝트 폴더로 이동 (설치 위치에 맞게 경로 조정)
+cd ai-newsletter-automation
+#    Windows 예: cd C:\Users\KOSCOM\workplace\ai-newsletter-automation
+#    Mac 예:     cd ~/workspace/ai-newsletter-automation
+
+# 2) 의존성 설치 (최초 1회, 또는 업데이트 후)
 uv sync
+
+# 3) 실행
 uv run ai-newsletter                 # 하위 명령 없이 실행하면 대화형으로 진입 (옵션을 물어보며 생성)
 uv run ai-newsletter sample
 uv run ai-newsletter build --days 7 --limit 10
