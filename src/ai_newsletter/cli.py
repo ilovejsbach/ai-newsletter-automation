@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -16,6 +17,7 @@ from .models import CollectionOptions
 from .ranking import build_quality_report, rank_articles
 from .render import make_output_dir, write_package
 from .topic_radar import build_issue_radar
+from .usage import usage
 
 app = typer.Typer(help="Weekly AI newsletter crawler and HTML packager.")
 console = Console()
@@ -130,6 +132,8 @@ def _run_build(
     include_candidates: bool = False,
     candidate_sources: Path = Path("config/sources.candidate.yaml"),
 ) -> None:
+    usage.reset()
+    t0 = time.monotonic()
     load_environment(env_file)
     source_list = load_sources(sources)
     all_sources = list(source_list.sources)
@@ -171,6 +175,7 @@ def _run_build(
                 console.print(f"[yellow]WARN[/yellow] {source.name}: {exc}")
     finally:
         collector.close()
+    t_collect = time.monotonic()
 
     issues = []
     if selection_mode == "latest":
@@ -210,18 +215,36 @@ def _run_build(
     else:
         issues, selected = build_issue_radar(candidates, limit=4, use_llm=use_llm)
         report = build_quality_report(selected, candidates)
+    t_select = time.monotonic()
     if use_llm:
         selected = enrich_with_openai(selected)
     report["issues"] = [issue.model_dump(mode="json") for issue in issues]
     if use_llm:
         report = evaluate_with_openai(selected, report)
+    t_enrich = time.monotonic()
+
+    report["usage"] = usage.summary()
+    report["timing_sec"] = {
+        "collect": round(t_collect - t0, 1),
+        "select": round(t_select - t_collect, 1),
+        "enrich_llm": round(t_enrich - t_select, 1),
+        "subtotal_pre_render": round(t_enrich - t0, 1),
+    }
 
     period_end = datetime.now(timezone.utc)
     period_start = period_end - timedelta(days=days)
     output_dir = make_output_dir(output, period_end)
     package = write_package(output_dir, period_start, period_end, candidates, selected, report, issues=issues)
+    t_render = time.monotonic()
+    u = report["usage"]
     console.print(f"[bold green]Created[/bold green] {package.output_dir / 'newsletter.html'}")
     console.print(f"[bold green]Created[/bold green] {package.output_dir.with_suffix('.zip')}")
+    console.print(
+        f"[dim]tokens: {u['total_tokens']:,} (in {u['input_tokens']:,} / out {u['output_tokens']:,}, "
+        f"{u['openai_calls']} calls)  |  time: {round(t_render - t0, 1)}s "
+        f"(collect {round(t_collect - t0, 1)} / select {round(t_select - t_collect, 1)} / "
+        f"enrich {round(t_enrich - t_select, 1)} / render {round(t_render - t_enrich, 1)})[/dim]"
+    )
 
 
 def _parse_source_ids(value: str) -> set[str]:

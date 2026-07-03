@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from .models import Article, Issue, RankedArticle
 from .ranking import score_article
+from .usage import usage
 
 FOUNDATION_SOURCE_IDS = {
     "openai-news",
@@ -92,6 +93,7 @@ def _build_llm_issues(articles: list[RankedArticle], limit: int) -> list[Issue]:
             input=prompt,
             text={"format": {"type": "json_object"}},
         )
+        usage.record(response)
         data = json.loads(response.output_text)
     except Exception:
         return []
