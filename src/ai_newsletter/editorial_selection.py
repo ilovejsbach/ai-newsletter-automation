@@ -117,8 +117,7 @@ def select_editorial_articles(
     # Collapse near-duplicate stories: keep the best article per topic_key.
     by_topic: dict[str, RankedArticle] = {}
     for article in scored:
-        key = article.score_breakdown.get("topic_key") or article.id  # type: ignore[assignment]
-        key = str(key)
+        key = article.topic_key or article.id
         current = by_topic.get(key)
         if current is None or _prefer(article, current):
             by_topic[key] = article
@@ -168,7 +167,7 @@ def _pick_with_diversity(
         nonlocal big_lab_count
         selected.append(article)
         source_counts[article.source_id] = source_counts.get(article.source_id, 0) + 1
-        category = str(article.score_breakdown.get("category") or "other")
+        category = article.category or "other"
         category_counts[category] = category_counts.get(category, 0) + 1
         vendor = _vendor_of(article)
         if vendor:
@@ -192,7 +191,7 @@ def _pick_with_diversity(
         if article.id in protected_ids:
             continue
         vendor = _vendor_of(article)
-        category = str(article.score_breakdown.get("category") or "other")
+        category = article.category or "other"
         if source_counts.get(article.source_id, 0) >= per_source_limit:
             continue
         if vendor and vendor_counts.get(vendor, 0) >= per_vendor_limit:
@@ -277,11 +276,9 @@ def _llm_score(pool: list[Article]) -> list[RankedArticle]:
         importance = _clamp_int(row.get("importance"))
         ranked = score_article(article)
         ranked.score = float(importance)
-        ranked.score_breakdown = {
-            "llm_importance": float(importance),
-            "topic_key": row.get("topic_key") or _heuristic_topic_key(article),  # type: ignore[dict-item]
-            "category": row.get("category") or "other",  # type: ignore[dict-item]
-        }
+        ranked.score_breakdown = {"llm_importance": float(importance)}
+        ranked.topic_key = str(row.get("topic_key") or _heuristic_topic_key(article))
+        ranked.category = str(row.get("category") or "other")
         ranked.reason = str(row.get("reason") or "편집자 뉴스가치 기준으로 선별")
         scored.append(ranked)
     return scored
@@ -308,9 +305,9 @@ def _heuristic_score(pool: list[Article]) -> list[RankedArticle]:
             "corroboration": float(corroboration),
             "recency": round(recency, 3),
             "platform_penalty": round(platform_penalty, 3),
-            "topic_key": key,  # type: ignore[dict-item]
-            "category": "other",  # type: ignore[dict-item]
         }
+        base.topic_key = key
+        base.category = "other"
         base.reason = "휴리스틱(권위+교차검증+최신성) 기준으로 선별"
         scored.append(base)
     return scored
@@ -361,8 +358,8 @@ def _editorial_report(
                 "title": a.title,
                 "source": a.source_name,
                 "importance": a.score,
-                "topic_key": a.score_breakdown.get("topic_key"),
-                "category": a.score_breakdown.get("category"),
+                "topic_key": a.topic_key,
+                "category": a.category,
                 "reason": a.reason,
             }
             for a in selected
