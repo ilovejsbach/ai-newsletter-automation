@@ -17,6 +17,7 @@ class SourceConfig(BaseModel):
     weight: float = 1.0
     panel: str = "curator"
     authority_tier: float = 0.5
+    source_set: str = "main"
     enabled: bool = True
 
 

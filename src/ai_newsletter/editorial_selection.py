@@ -138,6 +138,115 @@ def select_editorial_articles(
     return selected, report
 
 
+def select_consensus_articles(
+    candidates: list[Article],
+    *,
+    limit: int = 10,
+    use_llm: bool = True,
+    per_source_limit: int = 2,
+    source_sets: dict[str, str] | None = None,
+) -> tuple[list[RankedArticle], dict[str, object]]:
+    """Rank by CORROBORATION: stories that the most distinct sources covered win.
+
+    The premise is that when many independent sites report the same event in the
+    same week, that overlap is itself the importance signal. Articles are grouped
+    by topic_key, each topic is scored by its distinct-source count, and the
+    highest-corroborated topics rise to the top (ties broken by importance, then
+    recency). One representative article per topic is emitted.
+    """
+    pool = [a for a in deduplicate(candidates) if _is_publishable(a)]
+    scored: list[RankedArticle] = []
+    mode = "consensus-heuristic"
+    if use_llm and os.getenv("OPENAI_API_KEY"):
+        scored = _llm_score(pool)
+        mode = "consensus-llm"
+    if not scored:
+        scored = _heuristic_score(pool)
+        mode = "consensus-heuristic"
+
+    source_sets = source_sets or {}
+
+    groups: dict[str, list[RankedArticle]] = {}
+    for article in scored:
+        groups.setdefault(article.topic_key or article.id, []).append(article)
+
+    topics: list[tuple[float, RankedArticle]] = []
+    candidate_hits: dict[str, int] = {}  # candidate source -> # cross-set topics it corroborated
+    for arts in groups.values():
+        sources = {a.source_id for a in arts}
+        corroboration = len(sources)
+        sets_covered = {source_sets.get(sid, "main") for sid in sources}
+        cross_set = len(sets_covered) >= 2
+        # Cross-set overlap (a candidate corroborating a main source, or vice versa)
+        # is a stronger signal than repetition within one set.
+        consensus_score = float(corroboration) + (2.0 if cross_set else 0.0)
+        rep = max(arts, key=lambda a: (a.authority_tier, a.score))
+        rep.score_breakdown = {
+            **rep.score_breakdown,
+            "corroboration": float(corroboration),
+            "cross_set": 1.0 if cross_set else 0.0,
+            "consensus_score": round(consensus_score, 2),
+        }
+        if cross_set:
+            rep.reason = f"{corroboration}개 출처(main+candidate 교차)가 다룬 화제 — 강한 중복 신호"
+            for a in arts:
+                if source_sets.get(a.source_id) == "candidate":
+                    candidate_hits[a.source_name] = candidate_hits.get(a.source_name, 0) + 1
+        elif corroboration > 1:
+            rep.reason = f"{corroboration}개 출처가 함께 다룬 화제 (중복도 상위)"
+        else:
+            rep.reason = "단일 출처 (중복 없음)"
+        topics.append((consensus_score, rep))
+
+    # Primary key: consensus score (corroboration + cross-set bonus). Ties: importance, recency.
+    topics.sort(key=lambda t: (t[0], t[1].score, _recency_ts(t[1])), reverse=True)
+
+    selected: list[RankedArticle] = []
+    source_counts: dict[str, int] = {}
+    for _, rep in topics:
+        if source_counts.get(rep.source_id, 0) >= per_source_limit:
+            continue
+        selected.append(rep)
+        source_counts[rep.source_id] = source_counts.get(rep.source_id, 0) + 1
+        if len(selected) >= limit:
+            break
+
+    multi = sum(1 for _, r in topics if r.score_breakdown.get("corroboration", 1) > 1)
+    cross = sum(1 for _, r in topics if r.score_breakdown.get("cross_set", 0) == 1.0)
+    report = {
+        "mode": mode,
+        "candidate_count": len(pool),
+        "distinct_topics": len(topics),
+        "multi_source_topics": multi,
+        "cross_set_topics": cross,
+        "candidate_contribution": dict(sorted(candidate_hits.items(), key=lambda kv: kv[1], reverse=True)),
+        "selected_count": len(selected),
+        "selected": [
+            {
+                "title": r.title,
+                "source": r.source_name,
+                "corroboration": int(r.score_breakdown.get("corroboration", 1)),
+                "cross_set": bool(r.score_breakdown.get("cross_set", 0)),
+                "importance": r.score,
+                "topic_key": r.topic_key,
+                "reason": r.reason,
+            }
+            for r in selected
+        ],
+        "selection_contract": {
+            "rule": "여러 출처가 함께 다룬 화제(중복도)를 1순위로 랭킹, main+candidate 교차 시 가산점",
+            "ranking": "consensus_score(corroboration + cross-set bonus) → importance → recency",
+            "dedup": "topic_key로 묶어 대표 1건",
+            "diversity": "출처당 최대 2건",
+        },
+    }
+    return selected, report
+
+
+def _recency_ts(article: RankedArticle) -> float:
+    return article.published_at.timestamp() if article.published_at else 0.0
+
+
 def _prefer(candidate: RankedArticle, current: RankedArticle) -> bool:
     """Prefer the higher-scored article for a topic; break ties toward official sources."""
     if candidate.score != current.score:
