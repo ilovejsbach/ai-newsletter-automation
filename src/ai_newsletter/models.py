@@ -47,6 +47,8 @@ class Article(BaseModel):
 class RankedArticle(Article):
     score: float = 0.0
     score_breakdown: dict[str, float] = Field(default_factory=dict)
+    topic_key: str = ""
+    category: str = ""
     reason: str = ""
     korean_title: str = ""
     korean_summary: str = ""
