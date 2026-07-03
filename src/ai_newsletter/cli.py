@@ -20,6 +20,15 @@ from .topic_radar import build_issue_radar
 app = typer.Typer(help="Weekly AI newsletter crawler and HTML packager.")
 console = Console()
 
+# (key, one-line Korean description) for the interactive menu and help.
+MODE_CHOICES: list[tuple[str, str]] = [
+    ("issue", "이슈 레이더 — 주제로 묶어 선별 (기본)"),
+    ("latest", "최신 사이트 — 지정 사이트의 최근 1주 기사"),
+    ("editorial", "편집자 — LLM 뉴스가치 채점 + 주제 중복제거"),
+    ("editorial-diverse", "편집자+다양성 — 파운데이션 모델 쏠림 완화"),
+    ("rank", "레거시 랭킹 — 순수 점수 정렬"),
+]
+
 
 @app.command()
 def build(
@@ -47,6 +56,40 @@ def build(
     require_dates: bool = typer.Option(True, help="Drop items when no date can be parsed."),
     strict_week: bool = typer.Option(True, help="Drop items outside the collection window."),
     per_source_limit: int = typer.Option(20, min=1, max=100, help="Maximum candidate items per source."),
+) -> None:
+    """Collect, select, and render the weekly newsletter with explicit flags."""
+    _run_build(
+        sources=sources,
+        output=output,
+        env_file=env_file,
+        days=days,
+        limit=limit,
+        use_llm=use_llm,
+        selection_mode=selection_mode,
+        issue_radar=issue_radar,
+        latest_source_ids=latest_source_ids,
+        latest_fill=latest_fill,
+        require_dates=require_dates,
+        strict_week=strict_week,
+        per_source_limit=per_source_limit,
+    )
+
+
+def _run_build(
+    *,
+    sources: Path,
+    output: Path,
+    env_file: Path | None,
+    days: int,
+    limit: int,
+    use_llm: bool,
+    selection_mode: str,
+    issue_radar: bool,
+    latest_source_ids: str,
+    latest_fill: bool,
+    require_dates: bool,
+    strict_week: bool,
+    per_source_limit: int,
 ) -> None:
     load_environment(env_file)
     source_list = load_sources(sources)
@@ -127,6 +170,82 @@ def build(
 
 def _parse_source_ids(value: str) -> set[str]:
     return {item.strip() for item in value.split(",") if item.strip()}
+
+
+@app.command()
+def interactive() -> None:
+    """대화형으로 옵션을 골라 주간 뉴스레터를 생성합니다 (플래그를 외울 필요 없음)."""
+    import os
+
+    from rich.prompt import Confirm, IntPrompt, Prompt
+
+    console.print("[bold cyan]AI 뉴스레터 — 대화형 생성[/bold cyan]")
+    console.print("[dim]Enter를 누르면 대괄호 안의 기본값이 사용됩니다.[/dim]\n")
+
+    console.print("선별 모드를 고르세요:")
+    for i, (key, desc) in enumerate(MODE_CHOICES, 1):
+        console.print(f"  [bold]{i}[/bold]. {desc}")
+    picked = Prompt.ask(
+        "번호",
+        choices=[str(i) for i in range(1, len(MODE_CHOICES) + 1)],
+        default="1",
+        show_choices=False,
+    )
+    selection_mode = MODE_CHOICES[int(picked) - 1][0]
+
+    days = _clamp(IntPrompt.ask("수집 기간(일)", default=7), 1, 31)
+    limit = _clamp(IntPrompt.ask("메인 기사 수", default=10), 1, 30)
+
+    use_llm = Confirm.ask("OpenAI로 한국어 편집(LLM)을 사용할까요?", default=True)
+    if use_llm and not os.getenv("OPENAI_API_KEY"):
+        load_environment(None)  # pick up .env before warning
+        if not os.getenv("OPENAI_API_KEY"):
+            console.print(
+                "[yellow]주의: OPENAI_API_KEY가 없습니다. editorial 계열은 휴리스틱으로 대체되고, "
+                "그 외 모드는 한국어 편집 없이 생성됩니다.[/yellow]"
+            )
+
+    latest_source_ids = ""
+    latest_fill = True
+    if selection_mode == "latest":
+        latest_source_ids = Prompt.ask(
+            "지정 사이트 id (쉼표로 구분, 비우면 전체 rss/webpage)", default=""
+        )
+        latest_fill = Confirm.ask("지정 사이트에서 부족하면 다른 사이트로 보강할까요?", default=True)
+
+    output = Prompt.ask("출력 폴더", default="outputs")
+
+    console.print("\n[bold]설정 요약[/bold]")
+    console.print(
+        f"  모드=[cyan]{selection_mode}[/cyan]  기간={days}일  기사수={limit}  "
+        f"LLM={'예' if use_llm else '아니오'}  출력={output}"
+    )
+    if selection_mode == "latest" and latest_source_ids:
+        console.print(f"  지정 사이트={latest_source_ids}  보강={'예' if latest_fill else '아니오'}")
+    if not Confirm.ask("이 설정으로 생성할까요?", default=True):
+        console.print("[yellow]취소되었습니다.[/yellow]")
+        raise typer.Exit()
+
+    console.print()
+    _run_build(
+        sources=Path("config/sources.yaml"),
+        output=Path(output),
+        env_file=None,
+        days=days,
+        limit=limit,
+        use_llm=use_llm,
+        selection_mode=selection_mode,
+        issue_radar=True,
+        latest_source_ids=latest_source_ids,
+        latest_fill=latest_fill,
+        require_dates=True,
+        strict_week=True,
+        per_source_limit=20,
+    )
+
+
+def _clamp(value: int, low: int, high: int) -> int:
+    return max(low, min(high, value))
 
 
 @app.command()
