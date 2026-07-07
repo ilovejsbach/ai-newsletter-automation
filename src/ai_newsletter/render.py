@@ -14,16 +14,23 @@ from pathlib import Path
 from .models import Article, NewsletterPackage, RankedArticle
 from .models import Issue
 from .images import capture_article_images
+from .sections import SECTION_META, SECTION_ORDER
+
+
+def _is_sectioned(articles: list[RankedArticle]) -> bool:
+    """True when the package was built by the sectioned selection mode."""
+    return any(a.section in SECTION_META for a in articles)
 
 
 def make_output_dir(base_dir: Path, period_end: datetime) -> Path:
+    """Create a fresh output directory. Same-date reruns are kept side by side
+    (_v2, _v3, ...) instead of overwriting the earlier run."""
     slug = period_end.astimezone(timezone.utc).strftime("%Y-%m-%d_weekly_ai_newsletter")
     output_dir = base_dir / slug
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-    zip_path = output_dir.with_suffix(".zip")
-    if zip_path.exists():
-        zip_path.unlink()
+    version = 2
+    while output_dir.exists() or output_dir.with_suffix(".zip").exists():
+        output_dir = base_dir / f"{slug}_v{version}"
+        version += 1
     (output_dir / "assets" / "images").mkdir(parents=True, exist_ok=True)
     (output_dir / "data").mkdir(parents=True, exist_ok=True)
     return output_dir
@@ -37,11 +44,17 @@ def write_package(
     selected: list[RankedArticle],
     quality_report: dict[str, object],
     issues: list[Issue] | None = None,
+    overview: str = "",
+    capture: bool = True,
+    theme: str = "editorial",
+    thumbnails: bool = True,
 ) -> NewsletterPackage:
     package = NewsletterPackage(
         period_start=period_start,
         period_end=period_end,
         title=f"AI 주간 뉴스레터 | {period_start:%Y.%m.%d} - {period_end:%Y.%m.%d}",
+        overview=overview,
+        thumbnails=thumbnails,
         articles=selected,
         issues=issues or [],
         quality_report=quality_report,
@@ -56,9 +69,10 @@ def write_package(
             encoding="utf-8",
         )
     (output_dir / "newsletter.html").write_text(render_html(package), encoding="utf-8")
-    (output_dir / "assets" / "style.css").write_text(render_css(), encoding="utf-8")
-    write_board_exports(package)
-    write_publish_ready_package(package)
+    (output_dir / "assets" / "style.css").write_text(render_css(theme), encoding="utf-8")
+    write_board_exports(package, capture=capture)
+    if capture:
+        write_publish_ready_package(package)
     (output_dir / "data" / "crawled_articles.json").write_text(
         json.dumps([a.model_dump(mode="json") for a in candidates], ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -71,6 +85,13 @@ def write_package(
         json.dumps(quality_report, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    _finalize_package(package)
+    return package
+
+
+def _finalize_package(package: NewsletterPackage) -> None:
+    """Refresh the manifest file list and the distribution zip."""
+    output_dir = package.output_dir
     manifest = {
         "title": package.title,
         "entrypoint": "newsletter.html",
@@ -83,13 +104,26 @@ def write_package(
     )
     archive_path = shutil.make_archive(str(output_dir), "zip", output_dir)
     Path(archive_path).replace(output_dir.with_suffix(".zip"))
-    return package
+
+
+def capture_package(package: NewsletterPackage) -> None:
+    """PNG-only stage: capture PNGs from the already-rendered HTML and build
+    the publish package, then refresh manifest/zip. HTML is not regenerated."""
+    write_board_image_exports(package)
+    write_publish_ready_package(package)
+    _finalize_package(package)
 
 
 def write_publish_ready_package(package: NewsletterPackage) -> None:
     date_key = package.period_end.strftime("%Y%m%d")
     date_slug = package.period_end.strftime("%Y-%m-%d")
-    publish_root = package.output_dir.parent / "publish_ready" / f"{date_slug}_ai_weekly"
+    # Same-date reruns (…_v2) get their own publish folder so packages never
+    # overwrite each other. File names INSIDE the package stay contract-fixed
+    # (ai_weekly_YYYYMMDD_*.png) for the UiPath automation.
+    base_name = package.output_dir.name
+    date_prefix = f"{date_slug}_weekly_ai_newsletter"
+    variant = base_name[len(date_prefix):] if base_name.startswith(date_prefix) else ""
+    publish_root = package.output_dir.parent / "publish_ready" / f"{date_slug}_ai_weekly{variant}"
     package_dir = publish_root / "transfer_package"
     images_dir = package_dir / "images"
     publish_dir = package_dir / "publish"
@@ -261,7 +295,7 @@ def render_publish_readme(date_key: str) -> str:
 """
 
 
-def write_board_exports(package: NewsletterPackage) -> None:
+def write_board_exports(package: NewsletterPackage, capture: bool = True) -> None:
     board_dir = package.output_dir / "board"
     board_images = board_dir / "images"
     board_images.mkdir(parents=True, exist_ok=True)
@@ -282,7 +316,8 @@ def write_board_exports(package: NewsletterPackage) -> None:
     for filename, html in variants.items():
         (board_dir / filename).write_text(html, encoding="utf-8")
 
-    write_board_image_exports(package)
+    if capture:
+        write_board_image_exports(package)
 
     manifest = {
         "purpose": "Namo WebEditor/internal board compatibility test outputs",
@@ -366,6 +401,47 @@ def write_board_image_exports(package: NewsletterPackage) -> None:
 def capture_html_as_png(html_path: Path, output_path: Path) -> tuple[bool, str]:
     if not html_path.exists():
         return False, "source HTML not found"
+    # 1순위: Python playwright — `uv sync`가 설치하고, 브라우저는
+    # `uv run playwright install chromium` 1회로 준비된다 (Node.js 불필요).
+    try:
+        from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
+    except ImportError:
+        return _capture_with_npx(html_path, output_path)  # 레거시 폴백 (Node 환경)
+    try:
+        with sync_playwright() as p:
+            # 사내망에서는 playwright의 chromium 다운로드가 SSL 검사 프록시에
+            # 막히므로, 이미 설치된 Chrome/Edge(channel)를 우선 사용한다.
+            browser = None
+            errors: list[str] = []
+            for channel in ("chrome", "msedge", None):
+                try:
+                    browser = (
+                        p.chromium.launch(channel=channel) if channel else p.chromium.launch()
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001 - try the next channel
+                    errors.append(f"{channel or 'bundled'}: {str(exc)[:120]}")
+            if browser is None:
+                return False, (
+                    "브라우저 없음 — Chrome 또는 Edge를 설치하거나 "
+                    "`uv run playwright install chromium`을 실행하세요. " + " / ".join(errors)
+                )
+            page = browser.new_page(viewport={"width": 960, "height": 1400})
+            # 배포물이 PNG이므로 폰트(CDN)·이미지가 다 로드된 뒤 캡처한다:
+            # networkidle = 네트워크 요청이 잠잠해질 때까지 대기 (고정 대기보다 확실)
+            try:
+                page.goto(html_path.resolve().as_uri(), wait_until="networkidle", timeout=30000)
+            except Exception:
+                pass  # networkidle 타임아웃이어도 아래에서 여유를 두고 캡처
+            page.wait_for_timeout(500)
+            page.screenshot(path=str(output_path.resolve()), full_page=True)
+            browser.close()
+    except Exception as exc:
+        return False, str(exc)[:300]
+    return output_path.exists(), "created"
+
+
+def _capture_with_npx(html_path: Path, output_path: Path) -> tuple[bool, str]:
     try:
         subprocess.run(
             [
@@ -374,7 +450,7 @@ def capture_html_as_png(html_path: Path, output_path: Path) -> tuple[bool, str]:
                 "screenshot",
                 "--full-page",
                 "--viewport-size=960,1400",
-                "--wait-for-timeout=600",
+                "--wait-for-timeout=1500",
                 html_path.resolve().as_uri(),
                 str(output_path.resolve()),
             ],
@@ -713,7 +789,7 @@ def render_namo_inline(package: NewsletterPackage, image_mode: str) -> str:
         '<div style="border-bottom:3px solid #0f766e;padding:22px 0 16px;margin-bottom:24px;">',
         '<p style="margin:0 0 8px;color:#0f766e;font-weight:bold;font-size:13px;letter-spacing:1px;">Weekly AI Radar</p>',
         f'<h1 style="margin:0 0 10px;font-size:30px;line-height:1.32;color:#111;">{escape(package.title)}</h1>',
-        '<p style="margin:0;color:#555;font-size:16px;">이번 주 AI 이슈를 주제 중심으로 정리하고, 대표 아티클을 사내 공유용으로 편집했습니다.</p>',
+        f'<p style="margin:0;color:#555;font-size:16px;">{escape(package.overview or "이번 주 AI 이슈를 주제 중심으로 정리하고, 대표 아티클을 사내 공유용으로 편집했습니다.")}</p>',
         '</div>',
     ]
     if package.issues:
@@ -729,26 +805,62 @@ def render_namo_inline(package: NewsletterPackage, image_mode: str) -> str:
 </div>
 """
             )
-    body.append('<h2 style="font-size:24px;margin:34px 0 14px;padding-bottom:8px;border-bottom:1px solid #ccc;color:#111;">상세 아티클</h2>')
-    for idx, article in enumerate(package.articles, 1):
-        title = article.korean_title or article.title
-        image = _board_image_src(package, article, image_mode)
-        image_html = (
-            f'<p style="margin:12px 0 18px;"><img src="{escape(image)}" alt="대표 이미지" style="display:block;width:100%;max-width:760px;height:auto;border:1px solid #ddd;"></p>'
-            if image
-            else ""
-        )
-        sections = article.detail_sections or _fallback_detail_sections(article)
-        section_html = "".join(
-            f"""
+    _NAMO_H2 = '<h2 style="font-size:24px;margin:34px 0 14px;padding-bottom:8px;border-bottom:1px solid #ccc;color:#111;">{}</h2>'
+    if _is_sectioned(package.articles):
+        indexed = list(enumerate(package.articles, 1))
+        top = sorted(indexed, key=lambda item: item[1].score, reverse=True)[:3]
+        body.append(_NAMO_H2.format("이번 주 레이더"))
+        body.append('<ul style="margin:6px 0 18px 22px;padding:0;">')
+        for _, article in top:
+            line = article.hook or article.one_liner or article.korean_title or article.title
+            body.append(
+                f'<li style="margin:6px 0;color:#333;">{escape(line)} '
+                f'<span style="color:#888;font-size:13px;">— {escape(article.source_name)}</span></li>'
+            )
+        body.append("</ul>")
+        for sec in SECTION_ORDER:
+            meta = SECTION_META[sec]
+            rows = [(idx, a) for idx, a in indexed if a.section == sec]
+            body.append(_NAMO_H2.format(escape(meta["title"])))
+            if not rows:
+                body.append(f'<p style="margin:0 0 12px;color:#888;">{escape(meta["empty"])}</p>')
+                continue
+            body.append(f'<p style="margin:0 0 12px;color:#666;font-size:14px;">{escape(meta["description"])}</p>')
+            for idx, article in rows:
+                body.append(_namo_article_html(package, idx, article, image_mode))
+        leftovers = [(idx, a) for idx, a in indexed if a.section not in SECTION_META]
+        if leftovers:
+            body.append(_NAMO_H2.format("그 밖의 소식"))
+            for idx, article in leftovers:
+                body.append(_namo_article_html(package, idx, article, image_mode))
+    else:
+        body.append(_NAMO_H2.format("상세 아티클"))
+        for idx, article in enumerate(package.articles, 1):
+            body.append(_namo_article_html(package, idx, article, image_mode))
+    body.append("</div>")
+    return "\n".join(body)
+
+
+def _namo_article_html(
+    package: NewsletterPackage, idx: int, article: RankedArticle, image_mode: str
+) -> str:
+    title = article.korean_title or article.title
+    image = _board_image_src(package, article, image_mode)
+    image_html = (
+        f'<p style="margin:12px 0 18px;"><img src="{escape(image)}" alt="대표 이미지" style="display:block;width:100%;max-width:760px;height:auto;border:1px solid #ddd;"></p>'
+        if image
+        else ""
+    )
+    sections = article.detail_sections or _fallback_detail_sections(article)
+    section_html = "".join(
+        f"""
 <h4 style="font-size:18px;margin:22px 0 8px;color:#111;">{escape(section.get("heading", ""))}</h4>
 {namo_paragraphs(section.get("body", ""))}
 """
-            for section in sections
-        )
-        terms = ", ".join(str(term) for term in article.terms[:8])
-        body.append(
-            f"""
+        for section in sections
+    )
+    terms = ", ".join(str(term) for term in article.terms[:8])
+    return f"""
 <div style="border-top:1px solid #ddd;padding:28px 0;">
   <p style="margin:0 0 6px;color:#777;font-size:13px;">{idx:02d} · {escape(article.source_name)}</p>
   <h3 style="font-size:24px;line-height:1.36;margin:0 0 14px;color:#111;">{escape(title)}</h3>
@@ -759,9 +871,6 @@ def render_namo_inline(package: NewsletterPackage, image_mode: str) -> str:
   <p style="margin:0;color:#666;font-size:14px;word-break:break-all;"><strong>출처:</strong> {escape(article.url)}</p>
 </div>
 """
-        )
-    body.append("</div>")
-    return "\n".join(body)
 
 
 def namo_paragraphs(text: str) -> str:
@@ -806,7 +915,33 @@ def render_board_post(package: NewsletterPackage, css: str, image_mode: str, sim
 """
 
 
+def _board_article_html(
+    package: NewsletterPackage, idx: int, article: RankedArticle, image_mode: str
+) -> str:
+    title = article.korean_title or article.title
+    image = _board_image_src(package, article, image_mode)
+    image_html = f'<p><img class="board-image" src="{escape(image)}" alt="대표 이미지"></p>' if image else ""
+    sections = article.detail_sections or _fallback_detail_sections(article)
+    section_html = "".join(
+        f"<h4>{escape(section.get('heading', ''))}</h4>{paragraphs(section.get('body', ''))}"
+        for section in sections
+    )
+    terms = ", ".join(str(term) for term in article.terms[:8])
+    return f"""
+<article class="board-article" id="article-{idx:02d}">
+  <p class="board-source">{idx:02d} · {escape(article.source_name)}</p>
+  <h3>{escape(title)}</h3>
+  {image_html}
+  <p class="board-lead">{escape(article.detail_intro or article.korean_summary or article.summary)}</p>
+  {section_html}
+  <p class="board-terms"><strong>주요 용어:</strong> {escape(terms)}</p>
+  <p class="board-url"><strong>출처:</strong> {escape(article.url)}</p>
+</article>
+"""
+
+
 def render_board_body(package: NewsletterPackage, image_mode: str, simple: bool = False) -> str:
+    sectioned = _is_sectioned(package.articles)
     issue_html = ""
     if package.issues:
         issue_html = "<section class=\"board-section\"><h2>이번 주 이슈 레이더</h2>"
@@ -820,30 +955,43 @@ def render_board_body(package: NewsletterPackage, image_mode: str, simple: bool 
 </div>
 """
         issue_html += "</section>"
+    elif sectioned:
+        indexed = list(enumerate(package.articles, 1))
+        top = sorted(indexed, key=lambda item: item[1].score, reverse=True)[:3]
+        issue_html = "<section class=\"board-section\"><h2>이번 주 레이더</h2><ul class=\"board-radar\">"
+        for idx, article in top:
+            line = article.hook or article.one_liner or article.korean_title or article.title
+            issue_html += (
+                f'<li><a href="#article-{idx:02d}">{escape(line)}</a> '
+                f"<span>— {escape(article.source_name)}</span></li>"
+            )
+        issue_html += "</ul></section>"
 
-    article_html = "<section class=\"board-section\"><h2>상세 아티클</h2>"
-    for idx, article in enumerate(package.articles, 1):
-        title = article.korean_title or article.title
-        image = _board_image_src(package, article, image_mode)
-        image_html = f'<p><img class="board-image" src="{escape(image)}" alt="대표 이미지"></p>' if image else ""
-        sections = article.detail_sections or _fallback_detail_sections(article)
-        section_html = "".join(
-            f"<h4>{escape(section.get('heading', ''))}</h4>{paragraphs(section.get('body', ''))}"
-            for section in sections
-        )
-        terms = ", ".join(str(term) for term in article.terms[:8])
-        article_html += f"""
-<article class="board-article" id="article-{idx:02d}">
-  <p class="board-source">{idx:02d} · {escape(article.source_name)}</p>
-  <h3>{escape(title)}</h3>
-  {image_html}
-  <p class="board-lead">{escape(article.detail_intro or article.korean_summary or article.summary)}</p>
-  {section_html}
-  <p class="board-terms"><strong>주요 용어:</strong> {escape(terms)}</p>
-  <p class="board-url"><strong>출처:</strong> {escape(article.url)}</p>
-</article>
-"""
-    article_html += "</section>"
+    if sectioned:
+        article_html = ""
+        indexed = list(enumerate(package.articles, 1))
+        for sec in SECTION_ORDER:
+            meta = SECTION_META[sec]
+            rows = [(idx, a) for idx, a in indexed if a.section == sec]
+            article_html += f"<section class=\"board-section\"><h2>{escape(meta['title'])}</h2>"
+            if rows:
+                article_html += f"<p class=\"board-section-desc\">{escape(meta['description'])}</p>"
+                for idx, article in rows:
+                    article_html += _board_article_html(package, idx, article, image_mode)
+            else:
+                article_html += f"<p class=\"board-section-desc\">{escape(meta['empty'])}</p>"
+            article_html += "</section>"
+        leftovers = [(idx, a) for idx, a in indexed if a.section not in SECTION_META]
+        if leftovers:
+            article_html += "<section class=\"board-section\"><h2>그 밖의 소식</h2>"
+            for idx, article in leftovers:
+                article_html += _board_article_html(package, idx, article, image_mode)
+            article_html += "</section>"
+    else:
+        article_html = "<section class=\"board-section\"><h2>상세 아티클</h2>"
+        for idx, article in enumerate(package.articles, 1):
+            article_html += _board_article_html(package, idx, article, image_mode)
+        article_html += "</section>"
 
     wrapper_class = "board-post simple" if simple else "board-post"
     return f"""
@@ -851,7 +999,7 @@ def render_board_body(package: NewsletterPackage, image_mode: str, simple: bool 
   <header class="board-header">
     <p class="board-kicker">Weekly AI Radar</p>
     <h1>{escape(package.title)}</h1>
-    <p>이번 주 AI 이슈를 주제 중심으로 정리하고, 각 이슈의 대표 아티클을 사내 공유용으로 편집했습니다.</p>
+    <p>{escape(package.overview or "이번 주 AI 이슈를 주제 중심으로 정리하고, 각 이슈의 대표 아티클을 사내 공유용으로 편집했습니다.")}</p>
   </header>
   {issue_html}
   {article_html}
@@ -882,6 +1030,10 @@ def render_board_css() -> str:
 .board-post { max-width: 860px; margin: 0 auto; color: #1f2933; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif; line-height: 1.72; }
 .board-header { border-bottom: 3px solid #0f766e; padding: 24px 0 18px; margin-bottom: 26px; }
 .board-kicker { color: #0f766e; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 8px; }
+.board-radar { margin: 6px 0 18px 22px; padding: 0; }
+.board-radar li { margin: 6px 0; }
+.board-radar span { color: #888; font-size: 13px; }
+.board-section-desc { color: #666; font-size: 14px; margin: 0 0 12px; }
 .board-header h1 { font-size: 30px; line-height: 1.3; margin: 0 0 10px; }
 .board-section { margin: 30px 0; }
 .board-section > h2 { font-size: 23px; border-bottom: 1px solid #d8dee8; padding-bottom: 8px; margin: 0 0 16px; }
@@ -978,15 +1130,27 @@ def render_board_test_guide() -> str:
 
 def render_html(package: NewsletterPackage) -> str:
     hero_image = _first_image(package.articles)
-    issue_cards = render_issue_cards(package)
-    editor_ids = _issue_representative_ids(package)
-    editors = [article for article in package.articles if article.id in editor_ids]
-    if not issue_cards:
-        editors = package.articles[:2]
-        issue_cards = "".join(_feature_card(idx, article) for idx, article in enumerate(editors, 1))
-        editor_ids = {article.id for article in editors}
-    cards = render_grouped_articles(package.articles, skip_ids=editor_ids)
+    radar_title = "이번 주 이슈 레이더"
+    radar_hint = ""
+    if _is_sectioned(package.articles):
+        radar_hint = '<p class="radar-hint">번호는 상세 아티클(첨부 이미지) 번호와 동일합니다</p>'
+        # Radar = TOC-style one-liners for the top stories; sections below carry
+        # the full cards, so nothing is skipped.
+        radar_title = "이번 주 레이더"
+        issue_cards = render_radar_cards(package.articles)
+        cards = render_section_groups(package.articles, thumbnails=package.thumbnails)
+    else:
+        issue_cards = render_issue_cards(package)
+        editor_ids = _issue_representative_ids(package)
+        if not issue_cards:
+            editors = package.articles[:2]
+            issue_cards = "".join(
+                _feature_card(idx, article) for idx, article in enumerate(editors, 1)
+            )
+            editor_ids = {article.id for article in editors}
+        cards = render_grouped_articles(package.articles, skip_ids=editor_ids)
     hero = f'<img class="hero-image" src="{escape(hero_image)}" alt="대표 이미지">' if hero_image else '<div class="hero-panel"><span>AI</span><strong>Weekly Brief</strong></div>'
+    lead = package.overview or "AI 모델 경쟁은 에이전트(agent), 보안 자동화, 실무형 평가로 이동 중입니다. 이번 주 업무 영향도가 큰 신호만 골라 웹진형으로 정리했습니다."
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -1001,14 +1165,17 @@ def render_html(package: NewsletterPackage) -> str:
       <div>
         <p class="kicker">Weekly AI Brief</p>
         <h1>{escape(package.title)}</h1>
-        <p class="lead">AI 모델 경쟁은 에이전트(agent), 보안 자동화, 실무형 평가로 이동 중입니다. 이번 주 업무 영향도가 큰 신호만 골라 웹진형으로 정리했습니다.</p>
+        <p class="lead">{escape(lead)}</p>
       </div>
       {hero}
     </header>
     <section class="editors-pick">
       <header class="section-title">
-        <p>Editor's Pick</p>
-        <h2>이번 주 이슈 레이더</h2>
+        <div>
+          <p>Editor's Pick</p>
+          <h2>{radar_title}</h2>
+          {radar_hint}
+        </div>
       </header>
       <div class="feature-grid">
         {issue_cards}
@@ -1059,6 +1226,114 @@ def render_issue_cards(package: NewsletterPackage) -> str:
 """
         )
     return "".join(cards)
+
+
+def render_radar_cards(articles: list[RankedArticle]) -> str:
+    """TOC-style radar: the week's top three stories as one-line summary cards."""
+    indexed = list(enumerate(articles, 1))
+    top = sorted(indexed, key=lambda item: item[1].score, reverse=True)[:3]
+    cards = []
+    for idx, article in top:
+        detail_href = f"articles/{escape(article_filename(idx, article))}"
+        callout = _callout_text(article, 90)
+        section_title = SECTION_META.get(article.section, {}).get("title", "")
+        cards.append(
+            f"""
+<article class="feature-card issue-card">
+  <p class="source"><span class="article-number">{idx:02d}</span> {escape(section_title)}</p>
+  <h3><a href="{detail_href}">{escape(article.korean_title or article.title)}</a></h3>
+  <p class="card-callout">&ldquo;{escape(callout)}&rdquo;</p>
+</article>
+"""
+        )
+    return "".join(cards)
+
+
+def _truncate_text(text: str, limit: int = 170) -> str:
+    """Flatten list markers/newlines and cut at a sentence boundary near limit."""
+    flat = " ".join(
+        chunk.lstrip("-").strip() for chunk in text.split("\n") if chunk.strip()
+    )
+    if len(flat) <= limit:
+        return flat
+    cut = flat[:limit]
+    boundary = max(cut.rfind("다. "), cut.rfind(". "), cut.rfind("음. "), cut.rfind("함. "))
+    if boundary > limit * 0.4:
+        return cut[: boundary + 2].strip()
+    return cut.rstrip() + "…"
+
+
+def _callout_text(article: RankedArticle, limit: int = 90) -> str:
+    """포털 전역 공통 콜아웃: hook(본문 인용) → one_liner → 본문/요약 절단.
+    어떤 폴백이든 짧은 한 입 분량을 넘지 않는다 — 완결 요약 금지."""
+    text = article.hook or article.one_liner
+    if not text and article.detail_sections:
+        text = article.detail_sections[0].get("body", "")
+    if not text:
+        text = article.korean_summary or article.summary
+    return _truncate_text(text, limit)
+
+
+def _story_row(index: int, article: RankedArticle, thumb: bool = False) -> str:
+    """본지는 낚시(teaser): 제목 + 본문 콜아웃만 던지고, 내용 전부는
+    상세 아티클(첨부 이미지)로 유도한다. thumb=True면 대표 이미지 썸네일 표시."""
+    detail_href = f"articles/{escape(article_filename(index, article))}"
+    hook = _callout_text(article, 110)
+    # 배포물이 PNG이므로 썸네일은 캡처 시점에 확실히 존재하는 로컬 이미지만 쓴다.
+    # (원격 URL 폴백은 캡처 때 빈 박스가 될 수 있어 제외 — 없으면 텍스트 행으로)
+    image = article.local_image if thumb else ""
+    if image:
+        return f"""
+<article class="story has-thumb" id="story-{index:02d}">
+  <div class="story-main">
+    <p class="source">{_article_meta(index, article)}</p>
+    <h3><a href="{detail_href}">{escape(article.korean_title or article.title)}</a></h3>
+    <p class="story-hook">&ldquo;{escape(hook)}&rdquo;</p>
+  </div>
+  <div class="story-thumb"><img src="{escape(image)}" alt="대표 이미지"><span>{index:02d}</span></div>
+</article>
+"""
+    return f"""
+<article class="story" id="story-{index:02d}">
+  <span class="story-no">{index:02d}</span>
+  <p class="source">{_article_meta(index, article)}</p>
+  <h3><a href="{detail_href}">{escape(article.korean_title or article.title)}</a></h3>
+  <p class="story-hook">&ldquo;{escape(hook)}&rdquo;</p>
+</article>
+"""
+
+
+def render_section_groups(articles: list[RankedArticle], thumbnails: bool = False) -> str:
+    """Fixed-section layout, 시안 A 구조: 카드 그리드가 아니라 전폭 기사 행.
+    A section without articles states so instead of disappearing."""
+    indexed = list(enumerate(articles, 1))
+    html = []
+    for sec in SECTION_ORDER:
+        meta = SECTION_META[sec]
+        rows = [(idx, a) for idx, a in indexed if a.section == sec]
+        body = (
+            f'<div class="story-list">{"".join(_story_row(idx, a, thumb=thumbnails) for idx, a in rows)}</div>'
+            if rows
+            else f'<p class="section-empty">{escape(meta["empty"])}</p>'
+        )
+        html.append(
+            f"""<section class="article-group section-{sec}">
+  <header class="group-header">
+    <h2>{escape(meta["title"])}</h2>
+    <p>{escape(meta["description"])}</p>
+  </header>
+  {body}
+</section>"""
+        )
+    leftovers = [(idx, a) for idx, a in indexed if a.section not in SECTION_META]
+    if leftovers:
+        html.append(
+            f"""<section class="article-group">
+  <header class="group-header"><h2>그 밖의 소식</h2></header>
+  <div class="story-list">{"".join(_story_row(idx, a, thumb=thumbnails) for idx, a in leftovers)}</div>
+</section>"""
+        )
+    return "\n".join(html)
 
 
 def _issue_representative_ids(package: NewsletterPackage) -> set[str]:
@@ -1233,7 +1508,7 @@ def render_article_html(package: NewsletterPackage, index: int, article: RankedA
 </head>
 <body>
   <main class="newsletter detail-page">
-    <article class="detail-article">
+    <article class="detail-article{f' section-{escape(article.section)}' if article.section else ''}">
       <p class="source">{_article_meta(index, article)}</p>
       <h1>{escape(title)}</h1>
       {img}
@@ -1367,11 +1642,13 @@ def _image_src(article: RankedArticle, detail: bool = False) -> str:
     return image
 
 
-def render_css() -> str:
-    return """
-:root { color-scheme: light; --ink: #18202a; --muted: #627084; --line: #d8dee8; --paper: #ffffff; --wash: #f3f6f8; --accent: #0f766e; --warm: #b45309; }
+# 모든 테마 공통 기반 CSS. 폰트는 Pretendard로 통일 (PNG 캡처 시 CDN 로드).
+_BASE_CSS = """
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+:root { color-scheme: light; --ink: #191f28; --muted: #6b7684; --line: #e5e8eb; --paper: #ffffff; --wash: #f4f5f7; --accent: #0f766e; --warm: #b45309;
+  --frontier: #3b5bdb; --open: #0ca678; --research: #a855f7; --tooling: #e8590c; }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--wash); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif; line-height: 1.65; }
+body { margin: 0; background: var(--wash); color: var(--ink); font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif; line-height: 1.65; }
 .newsletter { max-width: 1080px; margin: 0 auto; background: var(--paper); min-height: 100vh; }
 .masthead { display: grid; grid-template-columns: 1.25fr .75fr; gap: 34px; align-items: stretch; padding: 48px 44px 32px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #ffffff 0%, #f7fafb 100%); }
 .kicker { margin: 0 0 8px; color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -1390,12 +1667,14 @@ h1 { margin: 0; font-size: 34px; line-height: 1.25; letter-spacing: 0; }
 .section-title { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
 .section-title p { margin: 0; color: var(--accent); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .section-title h2 { margin: 0; font-size: 24px; letter-spacing: 0; }
-.feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-.feature-card { border: 1px solid var(--line); border-radius: 8px; padding: 22px; background: #fbfcfd; min-height: 280px; display: flex; flex-direction: column; }
-.feature-card h3 { margin: 0 0 12px; font-size: 24px; line-height: 1.35; letter-spacing: 0; }
+/* 카드 수에 맞춰 열이 늘어난다: 3장이면 1열 3개, 2장이면 2개 */
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+.feature-card { border: 1px solid var(--line); border-radius: 8px; padding: 20px 22px; background: #fbfcfd; display: flex; flex-direction: column; }
+.feature-card h3 { margin: 0 0 10px; font-size: 20px; line-height: 1.38; letter-spacing: 0; }
 .feature-card h3 a { color: var(--ink); text-decoration: none; }
-.feature-card p { margin: 0 0 14px; }
-.feature-card .detail-link { margin-top: auto; }
+.feature-card p { margin: 0 0 12px; font-size: 14.5px; }
+.card-callout { padding-left: 12px; border-left: 3px solid var(--sc, var(--accent)); font-weight: 500; color: #333d4b; }
+.feature-card .detail-link { margin-top: auto; font-size: 13.5px; }
 .issue-card .why { background: transparent; border-left: 0; padding: 0; }
 .related-list { margin: 0 0 14px 18px; padding: 0; color: var(--muted); font-size: 14px; }
 .related-list li { margin: 4px 0; }
@@ -1404,6 +1683,7 @@ h1 { margin: 0; font-size: 34px; line-height: 1.25; letter-spacing: 0; }
 .group-header { padding: 30px 44px 12px; background: #fbfcfd; border-bottom: 1px solid var(--line); }
 .group-header h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0; }
 .group-header p { margin: 0; color: var(--muted); }
+.section-empty { margin: 0; padding: 22px 44px 30px; color: var(--muted); }
 .card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 24px 44px 32px; }
 .article-card { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; display: flex; flex-direction: column; min-height: 100%; }
 .article-card .article-body { padding: 18px; display: flex; flex-direction: column; flex: 1; }
@@ -1447,7 +1727,38 @@ th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: lef
 th { width: 140px; color: var(--muted); font-weight: 700; }
 .detail-article ul { margin: 8px 0 0 18px; padding: 0; color: var(--ink); }
 .detail-article li { margin: 6px 0; }
+/* 시안 A 구조: 전폭 기사 행 + 4단 슬롯 그리드 (sectioned 모드 본지) */
+.story-list { padding: 6px 44px 34px; }
+.story { position: relative; padding: 18px 0 20px; border-bottom: 1px solid var(--line); }
+.story:last-child { border-bottom: 0; }
+.story-no { position: absolute; top: 18px; right: 0; font-size: 34px; font-weight: 900; color: #c1c7cd; opacity: .35; line-height: 1; }
+.story h3 { margin: 6px 0 4px; font-size: 22px; line-height: 1.4; }
+.story h3 a { color: var(--ink); text-decoration: none; }
+.story h3 a:hover { color: var(--accent); text-decoration: underline; }
+.story-line { margin: 0 0 14px; color: #333d4b; font-size: 15.5px; }
+/* 썸네일 옵션: 텍스트 좌 + 대표 이미지 우, 이미지 위에 번호 배지 */
+.story.has-thumb { display: grid; grid-template-columns: 1fr 200px; gap: 22px; align-items: start; }
+.story-thumb { position: relative; }
+.story-thumb img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); display: block; }
+.story-thumb span { position: absolute; top: 8px; left: 8px; background: rgba(17,23,33,.82); color: #fff; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 4px; }
+
+/* 콜아웃(pull quote): 본문에서 그대로 인용한 한 문장. --sc는 섹션 색을 상속받는다 */
+.story-hook { margin: 2px 0 0; padding: 2px 0 2px 14px; border-left: 3px solid var(--sc, var(--accent)); color: #333d4b; font-size: 16.5px; font-weight: 500; line-height: 1.65; max-width: 720px; }
+.story-summary { margin: 0 0 10px; color: #333d4b; }
+.slots { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+.slot { background: #fff; padding: 14px 16px; }
+.slot h4 { margin: 0 0 6px; font-size: 12.5px; font-weight: 700; color: var(--muted); letter-spacing: .06em; }
+.slot p { margin: 0 0 8px; font-size: 14px; line-height: 1.65; color: #333d4b; }
+.slot p:last-child { margin-bottom: 0; }
+.slot ul { margin: 4px 0 8px 18px; padding: 0; font-size: 14px; color: #333d4b; }
+.slot li { margin: 3px 0; }
+.slot.impact { background: #fbfbf6; }
+.story-links { margin: 12px 0 0; font-size: 14px; }
+
 @media (max-width: 720px) {
+  .story-list { padding: 6px 22px 28px; }
+  .slots { grid-template-columns: 1fr; }
+  .story-no { font-size: 26px; }
   .masthead { grid-template-columns: 1fr; padding: 30px 22px 22px; }
   h1 { font-size: 27px; }
   .summary { grid-template-columns: 1fr; }
@@ -1464,3 +1775,114 @@ th { width: 140px; color: var(--muted); font-weight: 700; }
   th { width: 112px; }
 }
 """
+
+# ---- 테마 오버레이 (마크업 공통, CSS만 교체) ----
+
+# 시안 A: 미니멀 에디토리얼
+_EDITORIAL_CSS = """
+h1 { font-weight: 800; letter-spacing: -0.02em; }
+.masthead { border-bottom: 2px solid var(--ink); }
+.radar-hint { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+.article-number { border-radius: 4px; background: var(--ink); font-weight: 900; }
+/* 섹션 컬러 코딩: 헤더 밑줄·번호 칩·배지가 섹션 색을 따른다 */
+.article-group.section-frontier { --sc: var(--frontier); }
+.article-group.section-open { --sc: var(--open); }
+.article-group.section-research { --sc: var(--research); }
+.article-group.section-tooling { --sc: var(--tooling); }
+.article-group[class*="section-"] .group-header { border-bottom: 3px solid var(--sc); background: #fff; }
+.article-group[class*="section-"] .group-header h2 { font-weight: 800; }
+.article-group[class*="section-"] .article-number { background: var(--sc); }
+.article-group[class*="section-"] .detail-link { color: var(--sc); }
+.article-group[class*="section-"] .thumb-placeholder { background: color-mix(in srgb, var(--sc) 10%, #fff); color: var(--sc); }
+.article-group[class*="section-"] .slot h4 { color: var(--sc); }
+.article-group[class*="section-"] .story-no { color: var(--sc); opacity: .28; }
+/* 상세 아티클(개별 PNG)도 섹션 색 상속 */
+.detail-article.section-frontier { --sc: var(--frontier); }
+.detail-article.section-open { --sc: var(--open); }
+.detail-article.section-research { --sc: var(--research); }
+.detail-article.section-tooling { --sc: var(--tooling); }
+.detail-article[class*="section-"] .article-number { background: var(--sc); }
+.detail-article[class*="section-"] h1 { border-bottom: 3px solid var(--sc); padding-bottom: 14px; }
+.detail-article[class*="section-"] section h2 { color: var(--sc); font-size: 15px; letter-spacing: .04em; }
+.detail-article[class*="section-"] .detail-lead { background: #f8f9fa; border-left: 3px solid var(--sc); padding: 14px 18px; }
+"""
+
+# 시안 B: 카드 매거진 — 다크 헤더 + 컬러 칩 + 라운드 카드
+_MAGAZINE_CSS = """
+body { background: #eef1f6; }
+h1 { font-weight: 900; letter-spacing: -0.02em; }
+.masthead { background: linear-gradient(135deg, #1a1f2e 0%, #2b3350 100%); border-bottom: 0; }
+.masthead h1 { color: #fff; }
+.kicker { color: #9db2ff; }
+.lead { color: rgba(255,255,255,.78); }
+.radar-hint { color: rgba(255,255,255,.55); }
+.feature-card, .article-card { border: 0; border-radius: 16px; box-shadow: 0 2px 12px rgba(26,31,46,.09); }
+.feature-card { border-top: 4px solid var(--accent); }
+.article-number { border-radius: 999px; font-weight: 800; }
+.article-group.section-frontier { --sc: var(--frontier); }
+.article-group.section-open { --sc: var(--open); }
+.article-group.section-research { --sc: var(--research); }
+.article-group.section-tooling { --sc: var(--tooling); }
+.article-group[class*="section-"] .group-header { background: #fff; border-bottom: 0; }
+.article-group[class*="section-"] .group-header h2 { color: var(--sc); font-weight: 900; }
+.article-group[class*="section-"] .article-number { background: var(--sc); }
+.article-group[class*="section-"] .detail-link { color: var(--sc); }
+.article-group[class*="section-"] .slot h4 { color: var(--sc); }
+.article-group[class*="section-"] .story-no { color: var(--sc); opacity: .25; }
+.story { border-bottom: 0; background: #fff; border-radius: 16px; box-shadow: 0 2px 12px rgba(26,31,46,.07); padding: 22px 26px; margin-bottom: 18px; }
+.story-no { right: 22px; }
+.detail-article.section-frontier { --sc: var(--frontier); }
+.detail-article.section-open { --sc: var(--open); }
+.detail-article.section-research { --sc: var(--research); }
+.detail-article.section-tooling { --sc: var(--tooling); }
+.detail-article[class*="section-"] .article-number { background: var(--sc); }
+.detail-article[class*="section-"] section h2 { color: var(--sc); }
+.detail-article[class*="section-"] .detail-lead { background: color-mix(in srgb, var(--sc) 7%, #fff); border-left: 3px solid var(--sc); padding: 14px 18px; border-radius: 10px; }
+"""
+
+# 시안 C: 금융 리포트 — 네이비/골드, 절제된 섹션 색
+_REPORT_CSS = """
+:root { --frontier: #0b1f3a; --open: #1d6b4f; --research: #5b3a8c; --tooling: #8c4a1d; --accent: #0b1f3a; --warm: #b8963e; }
+body { background: #e9ebef; }
+.newsletter { background: #fdfcf9; }
+h1 { font-weight: 800; letter-spacing: -0.01em; }
+.masthead { background: #0b1f3a; border-bottom: 0; }
+.masthead h1 { color: #fff; }
+.kicker { color: #b8963e; letter-spacing: .14em; }
+.lead { color: rgba(255,255,255,.72); }
+.radar-hint { color: rgba(255,255,255,.5); }
+.section-title p { color: #b8963e; }
+.feature-card { background: #f4f1ea; border: 1px solid #e2dbc9; border-radius: 0; }
+.article-card { border-radius: 0; }
+.article-number { border-radius: 0; background: #0b1f3a; }
+.article-group.section-frontier { --sc: var(--frontier); }
+.article-group.section-open { --sc: var(--open); }
+.article-group.section-research { --sc: var(--research); }
+.article-group.section-tooling { --sc: var(--tooling); }
+.article-group[class*="section-"] .group-header { background: transparent; border-bottom: 2px solid var(--sc); }
+.article-group[class*="section-"] .group-header h2 { color: var(--sc); }
+.article-group[class*="section-"] .article-number { background: var(--sc); }
+.article-group[class*="section-"] .slot h4 { color: var(--sc); }
+.story { border-bottom: 1px dotted var(--line); }
+.slot.impact { background: #f6f3ec; }
+.detail-article.section-frontier { --sc: var(--frontier); }
+.detail-article.section-open { --sc: var(--open); }
+.detail-article.section-research { --sc: var(--research); }
+.detail-article.section-tooling { --sc: var(--tooling); }
+.detail-article[class*="section-"] .article-number { background: var(--sc); }
+.detail-article[class*="section-"] h1 { border-bottom: 3px solid var(--sc); padding-bottom: 14px; }
+.detail-article[class*="section-"] section h2 { color: var(--sc); }
+.detail-article[class*="section-"] .detail-lead { background: #f6f3ec; border-left: 3px solid #b8963e; padding: 14px 18px; }
+"""
+
+# 테마 이름 → 오버레이. classic은 기존 이미지(기반 CSS 그대로, 폰트만 Pretendard).
+THEMES: dict[str, str] = {
+    "classic": "",
+    "editorial": _EDITORIAL_CSS,
+    "magazine": _MAGAZINE_CSS,
+    "report": _REPORT_CSS,
+}
+
+
+def render_css(theme: str = "editorial") -> str:
+    return _BASE_CSS + THEMES.get(theme, _EDITORIAL_CSS)

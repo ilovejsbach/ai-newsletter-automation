@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 A — 미니멀 에디토리얼</title>
+<style>
+  @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+  :root {
+    --ink: #191f28; --sub: #6b7684; --line: #e5e8eb; --paper: #ffffff;
+    --frontier: #3b5bdb; --open: #0ca678; --research: #a855f7; --tooling: #e8590c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f4f5f7; font-family: 'Noto Sans KR', sans-serif; color: var(--ink); line-height: 1.7; }
+  .page { max-width: 860px; margin: 0 auto; background: var(--paper); }
+
+  .masthead { padding: 56px 64px 40px; border-bottom: 1px solid var(--ink); }
+  .kicker { font-size: 13px; font-weight: 700; letter-spacing: .22em; color: var(--sub); text-transform: uppercase; }
+  h1 { font-family: 'Noto Serif KR', serif; font-weight: 900; font-size: 40px; line-height: 1.25; margin: 14px 0 6px; }
+  .date { font-size: 14px; color: var(--sub); }
+  .overview { margin: 28px 0 0; padding: 22px 26px; background: #f8f9fa; border-left: 3px solid var(--ink); font-size: 16px; }
+  .overview strong { display: block; font-size: 13px; letter-spacing: .14em; color: var(--sub); margin-bottom: 8px; }
+
+  .radar { padding: 34px 64px; border-bottom: 1px solid var(--line); }
+  .radar h2 { font-size: 14px; letter-spacing: .18em; color: var(--sub); font-weight: 700; margin-bottom: 6px; }
+  .radar .hint { font-size: 12.5px; color: var(--sub); margin-bottom: 14px; }
+  .radar ol { list-style: none; }
+  .radar li { display: flex; gap: 16px; padding: 12px 0; border-top: 1px dashed var(--line); font-size: 17px; font-weight: 500; align-items: center; }
+  .no-chip { flex: 0 0 auto; width: 40px; height: 28px; display: grid; place-items: center; background: var(--ink); color: #fff; font-family: 'Noto Serif KR', serif; font-size: 15px; font-weight: 900; border-radius: 4px; }
+  .radar .src { margin-left: auto; font-size: 13px; color: var(--sub); white-space: nowrap; }
+
+  .section { padding: 44px 64px 20px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; border-bottom: 3px solid var(--c, var(--ink)); padding-bottom: 10px; margin-bottom: 8px; }
+  .sec-head h2 { font-family: 'Noto Serif KR', serif; font-size: 26px; font-weight: 900; }
+  .sec-head .en { font-size: 12px; letter-spacing: .18em; color: var(--c, var(--sub)); font-weight: 700; text-transform: uppercase; }
+  .sec-desc { font-size: 14px; color: var(--sub); margin-bottom: 6px; }
+  .s-frontier { --c: var(--frontier); } .s-open { --c: var(--open); }
+  .s-research { --c: var(--research); } .s-tooling { --c: var(--tooling); }
+
+  article { padding: 26px 0 30px; border-bottom: 1px solid var(--line); position: relative; }
+  article:last-child { border-bottom: 0; }
+  .a-no { position: absolute; top: 26px; right: 0; font-family: 'Noto Serif KR', serif; font-size: 34px; font-weight: 900; color: var(--c, #c1c7cd); opacity: .28; line-height: 1; }
+  .a-meta { font-size: 12.5px; color: var(--sub); display: flex; gap: 10px; align-items: center; }
+  .a-meta .no-chip { width: 36px; height: 24px; font-size: 13px; background: var(--c, var(--ink)); }
+  .badge { font-size: 11px; font-weight: 700; color: var(--c); border: 1px solid var(--c); padding: 1px 8px; border-radius: 20px; }
+  article h3 { font-size: 22px; line-height: 1.4; margin: 8px 0 4px; font-weight: 700; }
+  .one-liner { font-size: 15.5px; color: #333d4b; margin-bottom: 14px; }
+  .slots { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  .slot { background: #fff; padding: 14px 16px; }
+  .slot h4 { font-size: 12.5px; font-weight: 700; color: var(--c, var(--sub)); letter-spacing: .06em; margin-bottom: 6px; }
+  .slot p { font-size: 14px; color: #333d4b; line-height: 1.65; }
+  .slot.impact { background: #fbfbf6; }
+  .footer { padding: 30px 64px 46px; font-size: 12.5px; color: var(--sub); border-top: 1px solid var(--ink); }
+  /* 폰트 확정: Pretendard 단일 (조합 2) */
+  body, .page { font-family: 'Pretendard', 'Malgun Gothic', 'Noto Sans KR', sans-serif; }
+  h1, .sec-head h2, .no-chip, .a-no, .radar li::before { font-family: 'Pretendard', sans-serif; }
+  h1 { font-weight: 800; letter-spacing: -0.02em; }
+  .sec-head h2 { font-weight: 800; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <p class="kicker">Weekly AI Brief</p>
+    <h1>AI 주간 뉴스레터</h1>
+    <p class="date">2026.06.29 – 2026.07.06 · 제12호</p>
+    <div class="overview">
+      <strong>이번 주 큰 그림</strong>
+      프론티어 경쟁이 에이전트 실행 환경으로 옮겨간 한 주였습니다. Anthropic과 OpenAI가 나란히
+      차세대 모델 카드를 꺼냈고, 오픈웨이트 진영은 실시간 음성으로 응수했습니다. 규제 변수로
+      재배포된 Fable 5는 수출통제가 상수가 되었음을 보여줍니다. 이번 주는 에이전트 보안
+      게이트웨이의 실무 채택 신호를 주목할 만합니다.
+    </div>
+  </header>
+
+  <section class="radar">
+    <h2>이번 주 레이더</h2>
+    <p class="hint">번호는 아래 상세 아티클(첨부 이미지) 번호와 동일합니다.</p>
+    <ol>
+      <li><span class="no-chip">01</span> Claude Sonnet 5, 에이전트 전환의 승부수 <span class="src">Anthropic</span></li>
+      <li><span class="no-chip">03</span> DSpark — 검증을 줄여서 추론을 당긴다 <span class="src">AlphaSignal</span></li>
+      <li><span class="no-chip">04</span> LLM 안전 게이트웨이, 레퍼런스 구현 등장 <span class="src">GitHub</span></li>
+    </ol>
+  </section>
+
+  <section class="section s-frontier">
+    <div class="sec-head"><h2>프론티어 & 사업 동향</h2><span class="en">Frontier</span></div>
+    <p class="sec-desc">대형 연구소의 모델 공개·프리뷰, 규제/정책, 파트너십 등 산업이 움직인 사건</p>
+    <article>
+      <span class="a-no">01</span>
+      <p class="a-meta"><span class="no-chip">01</span><span class="badge">Frontier</span> Anthropic News · 06.30</p>
+      <h3>Claude Sonnet 5, 에이전트 전환의 승부수</h3>
+      <p class="one-liner">긴 작업을 끊기지 않게 수행하는 에이전트 특화 모델로 포지셔닝.</p>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>Anthropic이 Sonnet 5를 공개했다. 컨텍스트 1M 토큰, 도구 호출 오류율 절반 감소를 주장하며 가격은 동결됐다.</p></div>
+        <div class="slot"><h4>주요 트렌드</h4><p>모델 성능 경쟁에서 '중단 없는 장기 실행' 경쟁으로 축이 이동. 에이전트 런타임을 쥐는 쪽이 기업 시장을 쥔다.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>공개 당일 3개 매체가 비중 있게 다뤘고, HN·Reddit에서 실사용 벤치마크 스레드가 상위권에 올랐다.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>장기 실행 에이전트는 내부 승인·감사 체계와 충돌 지점이 생긴다. PoC 전 감사 로그 요구사항 정리가 선행 과제.</p></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="section s-open">
+    <div class="sec-head"><h2>오픈웨이트 & 오픈소스</h2><span class="en">Open</span></div>
+    <p class="sec-desc">오픈웨이트 모델과 GitHub/Hugging Face 생태계에서 주목할 프로젝트</p>
+    <article>
+      <span class="a-no">02</span>
+      <p class="a-meta"><span class="no-chip">02</span><span class="badge">Open</span> Hugging Face Blog · 07.01</p>
+      <h3>Gemma 4 실시간 음성, 온프레미스로 내려오다</h3>
+      <p class="one-liner">Cerebras 하드웨어에서 200ms 지연의 실시간 음성 파이프라인 시연.</p>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>HF와 Cerebras가 Gemma 4 기반 실시간 음성 데모를 공개했다. 전 구간 오픈 스택으로 구성됐다.</p></div>
+        <div class="slot"><h4>스펙과 도입 조건</h4><p>Gemma 라이선스는 상업 이용 허용. 데모 구성은 전용 가속기 기준이라 일반 GPU 기준 지연은 별도 검증 필요.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>r/LocalLLaMA 주간 상위권. 콜센터 적용 가능성을 두고 실측 스레드가 이어지는 중.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>상담 음성봇의 온프레미스 대안으로 후보군 진입. 국내어 성능과 STT 정확도가 1차 관문.</p></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="section s-research">
+    <div class="sec-head"><h2>연구 & 논문</h2><span class="en">Research</span></div>
+    <p class="sec-desc">논문·벤치마크·기법 연구 중 실무 관점에서 볼 만한 결과</p>
+    <article>
+      <span class="a-no">03</span>
+      <p class="a-meta"><span class="no-chip">03</span><span class="badge">Research</span> AlphaSignal · 07.02</p>
+      <h3>DSpark — 검증을 줄여서 추론을 당긴다</h3>
+      <p class="one-liner">무엇을 검증하지 않을지 학습해 LLM 추론 지연을 단축.</p>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>검증 단계를 선택적으로 생략하는 추론 가속 기법 발표. 품질 저하 없이 지연 단축을 주장.</p></div>
+        <div class="slot"><h4>방법과 결과</h4><p>검증 필요도를 예측하는 경량 헤드를 추가하는 방식. 벤치마크 수치는 원문 기준이며 재현 결과는 아직 없다.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>아직 공개된 반응은 확인되지 않았다.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>대량 배치 추론 비용 절감 후보. 금융 도메인은 검증 생략의 리스크 프로파일을 별도 평가해야 한다.</p></div>
+      </div>
+    </article>
+  </section>
+
+  <section class="section s-tooling">
+    <div class="sec-head"><h2>툴링 & 보안</h2><span class="en">Tooling</span></div>
+    <p class="sec-desc">개발 도구, 인프라, 보안 이슈 등 바로 써먹거나 조심해야 할 소식</p>
+    <article>
+      <span class="a-no">04</span>
+      <p class="a-meta"><span class="no-chip">04</span><span class="badge">Security</span> GitHub · 07.03</p>
+      <h3>LLM 안전 게이트웨이, 레퍼런스 구현 등장</h3>
+      <p class="one-liner">프롬프트 주입·유출 차단을 게이트웨이 계층에서 처리하는 구현체.</p>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>입출력 필터, 정책 엔진, 감사 로그를 갖춘 게이트웨이 오픈소스가 공개됐다.</p></div>
+        <div class="slot"><h4>도입 가치</h4><p>모델 앞단 공통 계층이라 애플리케이션 수정 없이 적용 가능. 운영 오버헤드는 정책 관리 비용.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>HN 100포인트 돌파. 유사 상용 제품 대비 자가호스팅 이점이 논점.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>사내 LLM 프록시 표준화의 참고 아키텍처. 한국어 프롬프트 주입 패턴 커버리지는 미검증.</p></div>
+      </div>
+    </article>
+  </section>
+
+  <footer class="footer">
+    AI 주간 뉴스레터 · 발행: IT연구소 · 문의: koscom.rnd02 · 본지는 공개 자료를 편집한 것으로 개별 기사의 정확성은 원문 기준입니다.
+  </footer>
+</div>
+</body>
+</html>

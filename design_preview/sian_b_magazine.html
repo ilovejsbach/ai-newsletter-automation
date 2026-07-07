@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 B — 카드 매거진</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap');
+  :root {
+    --ink: #1a1f2e; --sub: #62708a; --bg: #eef1f6; --card: #ffffff;
+    --frontier: #4263eb; --frontier-bg: #edf2ff;
+    --open: #099268; --open-bg: #e6fcf5;
+    --research: #9c36b5; --research-bg: #f8f0fc;
+    --tooling: #e8590c; --tooling-bg: #fff4e6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); font-family: 'Noto Sans KR', sans-serif; color: var(--ink); line-height: 1.65; }
+  .page { max-width: 900px; margin: 0 auto; padding: 0 0 40px; }
+
+  .masthead { background: linear-gradient(135deg, #1a1f2e 0%, #2b3350 100%); color: #fff; padding: 44px 48px 38px; border-radius: 0 0 22px 22px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 42px; height: 42px; border-radius: 12px; background: #fff; color: #1a1f2e; display: grid; place-items: center; font-weight: 900; font-size: 15px; }
+  .brand-name { font-size: 13px; font-weight: 700; letter-spacing: .2em; opacity: .85; }
+  h1 { font-size: 34px; font-weight: 900; margin: 18px 0 4px; }
+  .date { font-size: 14px; opacity: .65; }
+  .overview { margin-top: 24px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15); border-radius: 14px; padding: 18px 22px; font-size: 15px; }
+  .overview b { display: block; font-size: 12px; letter-spacing: .15em; opacity: .7; margin-bottom: 6px; }
+
+  .radar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 26px 32px 6px; }
+  .radar-card { background: var(--card); border-radius: 14px; padding: 18px; box-shadow: 0 2px 10px rgba(26,31,46,.06); border-top: 4px solid var(--c, #888); }
+  .radar-card .no { font-size: 12px; font-weight: 900; color: var(--c); letter-spacing: .1em; }
+  .radar-card h3 { font-size: 16px; line-height: 1.45; margin: 6px 0; }
+  .radar-card p { font-size: 13px; color: var(--sub); }
+
+  .section { padding: 30px 32px 0; }
+  .sec-band { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .sec-chip { background: var(--c); color: #fff; font-size: 12px; font-weight: 700; padding: 5px 14px; border-radius: 20px; letter-spacing: .05em; }
+  .sec-band h2 { font-size: 21px; font-weight: 900; }
+  .sec-band .count { margin-left: auto; font-size: 13px; color: var(--sub); }
+  .s-frontier { --c: var(--frontier); --cbg: var(--frontier-bg); }
+  .s-open { --c: var(--open); --cbg: var(--open-bg); }
+  .s-research { --c: var(--research); --cbg: var(--research-bg); }
+  .s-tooling { --c: var(--tooling); --cbg: var(--tooling-bg); }
+
+  .card { background: var(--card); border-radius: 16px; box-shadow: 0 2px 12px rgba(26,31,46,.07); overflow: hidden; margin-bottom: 18px; }
+  .card-top { padding: 22px 26px 16px; }
+  .a-meta { font-size: 12.5px; color: var(--sub); }
+  .card h3 { font-size: 20px; line-height: 1.42; margin: 6px 0 4px; font-weight: 700; }
+  .one-liner { display: inline-block; background: var(--cbg); color: var(--c); font-size: 13.5px; font-weight: 500; border-radius: 8px; padding: 5px 12px; margin-top: 6px; }
+  .slots { border-top: 1px solid #eef0f4; }
+  .slot { display: grid; grid-template-columns: 128px 1fr; gap: 14px; padding: 13px 26px; border-bottom: 1px solid #f2f4f8; }
+  .slot:last-child { border-bottom: 0; }
+  .slot h4 { font-size: 12.5px; font-weight: 700; color: var(--sub); padding-top: 2px; }
+  .slot p { font-size: 14px; color: #37415a; }
+  .slot.impact { background: var(--cbg); }
+  .slot.impact h4 { color: var(--c); }
+  .footer { text-align: center; font-size: 12.5px; color: var(--sub); padding: 26px 0 0; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <div class="brand"><div class="logo">AI</div><span class="brand-name">WEEKLY AI BRIEF</span></div>
+    <h1>AI 주간 뉴스레터 <span style="font-weight:400;opacity:.5;">제12호</span></h1>
+    <p class="date">2026.06.29 – 2026.07.06</p>
+    <div class="overview">
+      <b>이번 주 큰 그림</b>
+      프론티어 경쟁이 에이전트 실행 환경으로 옮겨간 한 주. Anthropic·OpenAI가 나란히 차세대 카드를
+      꺼냈고, 오픈웨이트 진영은 실시간 음성으로 응수했습니다. 규제 변수로 재배포된 Fable 5는
+      수출통제가 상수가 되었음을 보여줍니다. 에이전트 보안 게이트웨이의 채택 신호를 주목하세요.
+    </div>
+  </header>
+
+  <div class="radar">
+    <div class="radar-card" style="--c: var(--frontier)"><span class="no">RADAR 01</span><h3>Claude Sonnet 5, 에이전트 전환의 승부수</h3><p>Anthropic · 프론티어</p></div>
+    <div class="radar-card" style="--c: var(--frontier)"><span class="no">RADAR 02</span><h3>GPT-5.6 Sol 프리뷰 — 추론 단가 40%↓</h3><p>OpenAI · 프론티어</p></div>
+    <div class="radar-card" style="--c: var(--tooling)"><span class="no">RADAR 03</span><h3>LLM 안전 게이트웨이 레퍼런스 구현</h3><p>GitHub · 툴링 & 보안</p></div>
+  </div>
+
+  <section class="section s-frontier">
+    <div class="sec-band"><span class="sec-chip">FRONTIER</span><h2>프론티어 & 사업 동향</h2><span class="count">3건</span></div>
+    <div class="card">
+      <div class="card-top">
+        <p class="a-meta">Anthropic News · 06.30</p>
+        <h3>Claude Sonnet 5, 에이전트 전환의 승부수</h3>
+        <span class="one-liner">긴 작업을 끊기지 않게 수행하는 에이전트 특화 모델로 포지셔닝</span>
+      </div>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>컨텍스트 1M 토큰, 도구 호출 오류율 절반 감소 주장, 가격 동결. 에이전트 장기 실행에 초점을 맞춘 릴리즈.</p></div>
+        <div class="slot"><h4>주요 트렌드</h4><p>성능 경쟁에서 '중단 없는 장기 실행' 경쟁으로 축 이동. 에이전트 런타임을 쥐는 쪽이 기업 시장을 쥔다.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>공개 당일 3개 매체가 비중 있게 다뤘고, HN·Reddit에서 실사용 벤치마크 스레드가 상위권.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>장기 실행 에이전트는 내부 승인·감사 체계와 충돌 지점이 생김. PoC 전 감사 로그 요구사항 정리가 선행 과제.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section s-open">
+    <div class="sec-band"><span class="sec-chip">OPEN</span><h2>오픈웨이트 & 오픈소스</h2><span class="count">3건</span></div>
+    <div class="card">
+      <div class="card-top">
+        <p class="a-meta">Hugging Face Blog · 07.01</p>
+        <h3>Gemma 4 실시간 음성, 온프레미스로 내려오다</h3>
+        <span class="one-liner">Cerebras 하드웨어에서 200ms 지연의 실시간 음성 파이프라인 시연</span>
+      </div>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>HF·Cerebras가 Gemma 4 기반 실시간 음성 데모 공개. 전 구간 오픈 스택.</p></div>
+        <div class="slot"><h4>스펙과 도입 조건</h4><p>Gemma 라이선스는 상업 이용 허용. 전용 가속기 기준 시연이라 일반 GPU 지연은 별도 검증 필요.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>r/LocalLLaMA 주간 상위권. 콜센터 적용 가능성 실측 스레드 진행 중.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>상담 음성봇 온프레미스 대안 후보군 진입. 국내어 성능·STT 정확도가 1차 관문.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section s-research">
+    <div class="sec-band"><span class="sec-chip">RESEARCH</span><h2>연구 & 논문</h2><span class="count">2건</span></div>
+    <div class="card">
+      <div class="card-top">
+        <p class="a-meta">AlphaSignal · 07.02</p>
+        <h3>DSpark — 검증을 줄여서 추론을 당긴다</h3>
+        <span class="one-liner">무엇을 검증하지 않을지 학습해 LLM 추론 지연을 단축</span>
+      </div>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>검증 단계를 선택적으로 생략하는 추론 가속 기법. 품질 저하 없는 지연 단축 주장.</p></div>
+        <div class="slot"><h4>방법과 결과</h4><p>검증 필요도를 예측하는 경량 헤드 추가 방식. 수치는 원문 기준, 재현 결과는 아직 없음.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>아직 공개된 반응은 확인되지 않았다.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>대량 배치 추론 비용 절감 후보. 금융 도메인은 검증 생략 리스크를 별도 평가 필요.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section s-tooling">
+    <div class="sec-band"><span class="sec-chip">TOOLING</span><h2>툴링 & 보안</h2><span class="count">2건</span></div>
+    <div class="card">
+      <div class="card-top">
+        <p class="a-meta">GitHub · 07.03</p>
+        <h3>LLM 안전 게이트웨이, 레퍼런스 구현 등장</h3>
+        <span class="one-liner">프롬프트 주입·유출 차단을 게이트웨이 계층에서 처리</span>
+      </div>
+      <div class="slots">
+        <div class="slot"><h4>핵심 브리핑</h4><p>입출력 필터, 정책 엔진, 감사 로그를 갖춘 게이트웨이 오픈소스 공개.</p></div>
+        <div class="slot"><h4>도입 가치</h4><p>모델 앞단 공통 계층이라 앱 수정 없이 적용 가능. 운영 오버헤드는 정책 관리 비용.</p></div>
+        <div class="slot"><h4>업계의 움직임</h4><p>HN 100포인트 돌파. 상용 제품 대비 자가호스팅 이점이 논점.</p></div>
+        <div class="slot impact"><h4>시사점과 체크포인트</h4><p>사내 LLM 프록시 표준화의 참고 아키텍처. 한국어 주입 패턴 커버리지는 미검증.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="footer">AI 주간 뉴스레터 · 발행: IT연구소 · 본지는 공개 자료를 편집한 것으로 개별 기사의 정확성은 원문 기준입니다.</p>
+</div>
+</body>
+</html>

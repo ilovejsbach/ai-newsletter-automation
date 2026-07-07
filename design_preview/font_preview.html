@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>폰트 비교 — PNG 배포 기준</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=Noto+Serif+KR:wght@600;900&family=Nanum+Myeongjo:wght@700;800&display=swap');
+  @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f4f5f7; padding: 30px 0 60px; color: #191f28; }
+  .note { max-width: 860px; margin: 0 auto 26px; background: #fff8e1; border: 1px solid #e8d8a0; padding: 16px 22px; font-family: sans-serif; font-size: 14px; line-height: 1.7; }
+  .combo { max-width: 860px; margin: 0 auto 34px; background: #fff; padding: 40px 56px; }
+  .combo-label { font-size: 12px; letter-spacing: .15em; color: #b04545; font-weight: 700; font-family: sans-serif; margin-bottom: 18px; border-bottom: 2px solid #b04545; display: inline-block; padding-bottom: 4px; }
+  .no-chip { display: inline-grid; place-items: center; width: 36px; height: 24px; background: #191f28; color: #fff; font-size: 13px; font-weight: 900; border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+  .meta { font-size: 12.5px; color: #6b7684; margin-bottom: 8px; }
+  h3 { font-size: 24px; line-height: 1.4; margin-bottom: 6px; }
+  .one { font-size: 15.5px; color: #333d4b; margin-bottom: 14px; }
+  h4 { font-size: 13px; color: #3b5bdb; margin: 12px 0 4px; }
+  p.body { font-size: 14.5px; line-height: 1.7; color: #333d4b; }
+
+  .c1 { font-family: 'Noto Sans KR', sans-serif; }
+  .c1 h3 { font-family: 'Noto Serif KR', serif; font-weight: 900; }
+  .c2 { font-family: 'Pretendard', sans-serif; }
+  .c2 h3 { font-weight: 800; letter-spacing: -0.02em; }
+  .c3 { font-family: 'Pretendard', sans-serif; }
+  .c3 h3 { font-family: 'Nanum Myeongjo', serif; font-weight: 800; }
+</style>
+</head>
+<body>
+  <div class="note">
+    <strong>PNG 배포 기준 체크포인트</strong><br>
+    ① 세 조합 모두 무료·CDN 로딩이라 캡처 PC에 인터넷만 있으면 됩니다 (캡처 대기시간은 1.5초로 상향 완료).<br>
+    ② PNG는 게시판 뷰어에서 축소되므로 300급 얇은 굵기는 뭉개집니다 — 세 조합 모두 본문 400/500 이상만 사용.<br>
+    ③ 폰트 로딩 실패 시 맑은고딕 폴백으로 자동 대체되어 캡처가 깨지지는 않습니다.
+  </div>
+
+  <div class="combo c1">
+    <span class="combo-label">조합 1 — Noto Serif KR 제목 + Noto Sans KR 본문 (현 시안 A)</span>
+    <p class="meta"><span class="no-chip">01</span>Anthropic News · 06.30</p>
+    <h3>Claude Sonnet 5, 에이전트 전환의 승부수</h3>
+    <p class="one">긴 작업을 끊기지 않게 수행하는 에이전트 특화 모델로 포지셔닝.</p>
+    <h4>핵심 브리핑</h4>
+    <p class="body">Anthropic이 Sonnet 5를 공개했다. 컨텍스트 1M 토큰, 도구 호출 오류율 절반 감소를 주장하며 가격은 동결됐다. 에이전트 장기 실행에 초점을 맞춘 릴리즈다. 1234567890 AI/LLM.</p>
+  </div>
+
+  <div class="combo c2">
+    <span class="combo-label">조합 2 — Pretendard 단일 (제목 800)</span>
+    <p class="meta"><span class="no-chip">01</span>Anthropic News · 06.30</p>
+    <h3>Claude Sonnet 5, 에이전트 전환의 승부수</h3>
+    <p class="one">긴 작업을 끊기지 않게 수행하는 에이전트 특화 모델로 포지셔닝.</p>
+    <h4>핵심 브리핑</h4>
+    <p class="body">Anthropic이 Sonnet 5를 공개했다. 컨텍스트 1M 토큰, 도구 호출 오류율 절반 감소를 주장하며 가격은 동결됐다. 에이전트 장기 실행에 초점을 맞춘 릴리즈다. 1234567890 AI/LLM.</p>
+  </div>
+
+  <div class="combo c3">
+    <span class="combo-label">조합 3 — Nanum Myeongjo 제목 + Pretendard 본문</span>
+    <p class="meta"><span class="no-chip">01</span>Anthropic News · 06.30</p>
+    <h3>Claude Sonnet 5, 에이전트 전환의 승부수</h3>
+    <p class="one">긴 작업을 끊기지 않게 수행하는 에이전트 특화 모델로 포지셔닝.</p>
+    <h4>핵심 브리핑</h4>
+    <p class="body">Anthropic이 Sonnet 5를 공개했다. 컨텍스트 1M 토큰, 도구 호출 오류율 절반 감소를 주장하며 가격은 동결됐다. 에이전트 장기 실행에 초점을 맞춘 릴리즈다. 1234567890 AI/LLM.</p>
+  </div>
+</body>
+</html>

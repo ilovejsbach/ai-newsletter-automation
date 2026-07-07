@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시안 C — 금융 리포트</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&family=IBM+Plex+Mono:wght@500&display=swap');
+  :root {
+    --navy: #0b1f3a; --gold: #b8963e; --ink: #22304a; --sub: #5c6b84;
+    --line: #d9dfe8; --paper: #fdfcf9;
+    --frontier: #0b1f3a; --open: #1d6b4f; --research: #5b3a8c; --tooling: #8c4a1d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #e9ebef; font-family: 'Noto Sans KR', sans-serif; color: var(--ink); line-height: 1.7; }
+  .page { max-width: 860px; margin: 0 auto; background: var(--paper); }
+
+  .masthead { background: var(--navy); color: #fff; padding: 40px 56px 34px; }
+  .top-rule { display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: .12em; color: var(--gold); border-bottom: 1px solid rgba(184,150,62,.4); padding-bottom: 12px; margin-bottom: 22px; }
+  h1 { font-size: 32px; font-weight: 800; letter-spacing: -.01em; }
+  .subtitle { font-size: 14px; opacity: .7; margin-top: 4px; }
+  .overview { margin-top: 24px; border: 1px solid rgba(255,255,255,.25); padding: 18px 22px; font-size: 15px; }
+  .overview b { color: var(--gold); font-size: 12px; letter-spacing: .18em; display: block; margin-bottom: 8px; }
+
+  .radar { padding: 26px 56px; background: #f4f1ea; border-bottom: 1px solid var(--line); }
+  .radar h2 { font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: .18em; color: var(--gold); margin-bottom: 12px; }
+  .radar table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .radar td { padding: 9px 0; border-top: 1px solid var(--line); }
+  .radar td.no { width: 44px; font-family: 'IBM Plex Mono', monospace; color: var(--gold); font-weight: 500; }
+  .radar td.src { width: 130px; text-align: right; color: var(--sub); font-size: 13px; }
+
+  .section { padding: 38px 56px 8px; }
+  .sec-head { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .sec-no { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #fff; background: var(--c); padding: 4px 10px; }
+  .sec-head h2 { font-size: 22px; font-weight: 800; color: var(--c); }
+  .sec-rule { height: 2px; background: linear-gradient(to right, var(--c) 120px, var(--line) 120px); margin: 10px 0 4px; }
+  .sec-desc { font-size: 13.5px; color: var(--sub); }
+  .s-frontier { --c: var(--frontier); } .s-open { --c: var(--open); }
+  .s-research { --c: var(--research); } .s-tooling { --c: var(--tooling); }
+
+  article { padding: 24px 0 28px; border-bottom: 1px dotted var(--line); }
+  article:last-child { border-bottom: 0; }
+  .a-meta { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--sub); }
+  article h3 { font-size: 21px; font-weight: 700; line-height: 1.4; margin: 6px 0; }
+  .one-liner { font-size: 15px; color: var(--sub); border-left: 3px solid var(--gold); padding-left: 12px; margin: 10px 0 16px; }
+  .slot { margin-bottom: 13px; }
+  .slot h4 { display: inline-block; font-size: 13px; font-weight: 800; color: var(--c); margin-bottom: 3px; }
+  .slot h4::before { content: "■ "; font-size: 10px; vertical-align: 2px; }
+  .slot p { font-size: 14.5px; }
+  .slot.impact { background: #f6f3ec; border: 1px solid #e8e0cd; padding: 12px 16px; }
+  .slot.impact h4 { color: var(--gold); }
+  .footer { background: var(--navy); color: rgba(255,255,255,.65); font-size: 12px; padding: 18px 56px; margin-top: 30px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <div class="top-rule"><span>WEEKLY AI BRIEF — INTERNAL</span><span>NO.12 / 2026.07.06</span></div>
+    <h1>AI 주간 동향 보고</h1>
+    <p class="subtitle">2026.06.29 – 2026.07.06 · IT연구소</p>
+    <div class="overview">
+      <b>이번 주 큰 그림</b>
+      프론티어 경쟁이 에이전트 실행 환경으로 옮겨간 한 주. Anthropic·OpenAI가 나란히 차세대 카드를
+      꺼냈고, 오픈웨이트 진영은 실시간 음성으로 응수했다. 재배포된 Fable 5는 수출통제가 상수가
+      되었음을 보여준다. 이번 주는 에이전트 보안 게이트웨이의 채택 신호를 주목할 만하다.
+    </div>
+  </header>
+
+  <section class="radar">
+    <h2>THIS WEEK'S RADAR</h2>
+    <table>
+      <tr><td class="no">01</td><td>Claude Sonnet 5, 에이전트 전환의 승부수</td><td class="src">Anthropic</td></tr>
+      <tr><td class="no">02</td><td>GPT-5.6 Sol 프리뷰 — 추론 단가 40% 인하</td><td class="src">OpenAI</td></tr>
+      <tr><td class="no">03</td><td>Fable 5 재배포, 수출통제 이후 첫 사례</td><td class="src">MarkTechPost</td></tr>
+    </table>
+  </section>
+
+  <section class="section s-frontier">
+    <div class="sec-head"><span class="sec-no">01</span><h2>프론티어 & 사업 동향</h2></div>
+    <div class="sec-rule"></div>
+    <p class="sec-desc">대형 연구소의 모델 공개·프리뷰, 규제/정책, 파트너십 등 산업이 움직인 사건</p>
+    <article>
+      <p class="a-meta">ANTHROPIC NEWS · 2026-06-30</p>
+      <h3>Claude Sonnet 5, 에이전트 전환의 승부수</h3>
+      <p class="one-liner">긴 작업을 끊기지 않게 수행하는 에이전트 특화 모델로 포지셔닝.</p>
+      <div class="slot"><h4>핵심 브리핑</h4><p>컨텍스트 1M 토큰, 도구 호출 오류율 절반 감소 주장, 가격 동결. 에이전트 장기 실행에 초점을 맞춘 릴리즈다.</p></div>
+      <div class="slot"><h4>주요 트렌드</h4><p>모델 성능 경쟁에서 '중단 없는 장기 실행' 경쟁으로 축이 이동했다. 에이전트 런타임을 쥐는 쪽이 기업 시장을 쥔다.</p></div>
+      <div class="slot"><h4>업계의 움직임</h4><p>공개 당일 3개 매체가 비중 있게 다뤘고, HN·Reddit에서 실사용 벤치마크 스레드가 상위권에 올랐다.</p></div>
+      <div class="slot impact"><h4>시사점과 체크포인트</h4><p>장기 실행 에이전트는 내부 승인·감사 체계와 충돌 지점이 생긴다. PoC 전 감사 로그 요구사항 정리가 선행 과제.</p></div>
+    </article>
+  </section>
+
+  <section class="section s-open">
+    <div class="sec-head"><span class="sec-no">02</span><h2>오픈웨이트 & 오픈소스</h2></div>
+    <div class="sec-rule"></div>
+    <p class="sec-desc">오픈웨이트 모델과 GitHub/Hugging Face 생태계에서 주목할 프로젝트</p>
+    <article>
+      <p class="a-meta">HUGGING FACE BLOG · 2026-07-01</p>
+      <h3>Gemma 4 실시간 음성, 온프레미스로 내려오다</h3>
+      <p class="one-liner">Cerebras 하드웨어에서 200ms 지연의 실시간 음성 파이프라인 시연.</p>
+      <div class="slot"><h4>핵심 브리핑</h4><p>HF·Cerebras가 Gemma 4 기반 실시간 음성 데모를 공개했다. 전 구간 오픈 스택으로 구성됐다.</p></div>
+      <div class="slot"><h4>스펙과 도입 조건</h4><p>Gemma 라이선스는 상업 이용 허용. 전용 가속기 기준 시연이라 일반 GPU 지연은 별도 검증이 필요하다.</p></div>
+      <div class="slot"><h4>업계의 움직임</h4><p>r/LocalLLaMA 주간 상위권. 콜센터 적용 가능성을 두고 실측 스레드가 이어지는 중.</p></div>
+      <div class="slot impact"><h4>시사점과 체크포인트</h4><p>상담 음성봇의 온프레미스 대안 후보군 진입. 국내어 성능과 STT 정확도가 1차 관문.</p></div>
+    </article>
+  </section>
+
+  <section class="section s-research">
+    <div class="sec-head"><span class="sec-no">03</span><h2>연구 & 논문</h2></div>
+    <div class="sec-rule"></div>
+    <p class="sec-desc">논문·벤치마크·기법 연구 중 실무 관점에서 볼 만한 결과</p>
+    <article>
+      <p class="a-meta">ALPHASIGNAL · 2026-07-02</p>
+      <h3>DSpark — 검증을 줄여서 추론을 당긴다</h3>
+      <p class="one-liner">무엇을 검증하지 않을지 학습해 LLM 추론 지연을 단축.</p>
+      <div class="slot"><h4>핵심 브리핑</h4><p>검증 단계를 선택적으로 생략하는 추론 가속 기법이 발표됐다. 품질 저하 없는 지연 단축을 주장한다.</p></div>
+      <div class="slot"><h4>방법과 결과</h4><p>검증 필요도를 예측하는 경량 헤드를 추가하는 방식. 수치는 원문 기준이며 재현 결과는 아직 없다.</p></div>
+      <div class="slot"><h4>업계의 움직임</h4><p>아직 공개된 반응은 확인되지 않았다.</p></div>
+      <div class="slot impact"><h4>시사점과 체크포인트</h4><p>대량 배치 추론 비용 절감 후보. 금융 도메인은 검증 생략의 리스크 프로파일을 별도 평가해야 한다.</p></div>
+    </article>
+  </section>
+
+  <section class="section s-tooling">
+    <div class="sec-head"><span class="sec-no">04</span><h2>툴링 & 보안</h2></div>
+    <div class="sec-rule"></div>
+    <p class="sec-desc">개발 도구, 인프라, 보안 이슈 등 바로 써먹거나 조심해야 할 소식</p>
+    <article>
+      <p class="a-meta">GITHUB · 2026-07-03</p>
+      <h3>LLM 안전 게이트웨이, 레퍼런스 구현 등장</h3>
+      <p class="one-liner">프롬프트 주입·유출 차단을 게이트웨이 계층에서 처리하는 구현체.</p>
+      <div class="slot"><h4>핵심 브리핑</h4><p>입출력 필터, 정책 엔진, 감사 로그를 갖춘 게이트웨이 오픈소스가 공개됐다.</p></div>
+      <div class="slot"><h4>도입 가치</h4><p>모델 앞단 공통 계층이라 애플리케이션 수정 없이 적용 가능하다. 운영 오버헤드는 정책 관리 비용.</p></div>
+      <div class="slot"><h4>업계의 움직임</h4><p>HN 100포인트 돌파. 유사 상용 제품 대비 자가호스팅 이점이 논점.</p></div>
+      <div class="slot impact"><h4>시사점과 체크포인트</h4><p>사내 LLM 프록시 표준화의 참고 아키텍처. 한국어 프롬프트 주입 패턴 커버리지는 미검증.</p></div>
+    </article>
+  </section>
+
+  <footer class="footer">
+    <span>AI 주간 뉴스레터 · IT연구소</span>
+    <span>본지는 공개 자료를 편집한 것으로 개별 기사의 정확성은 원문 기준입니다</span>
+  </footer>
+</div>
+</body>
+</html>
