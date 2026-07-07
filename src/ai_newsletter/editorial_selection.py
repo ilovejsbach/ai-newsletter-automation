@@ -23,7 +23,7 @@ from .usage import usage
 
 # Heuristic entity patterns used for topic keys when the LLM is unavailable.
 _ENTITY_PATTERNS = [
-    r"gpt[-\s]?5\.?\d*",
+    r"gpt[-\s]?\d[\d.]*",
     r"claude\s+(?:opus|sonnet|haiku)\s*\d[\d.]*",
     r"fable\s*\d+",
     r"mithos",
@@ -51,6 +51,25 @@ _VENDOR_PATTERNS = {
 # Big frontier labs — grouped so "editorial-diverse" can guarantee breadth beyond
 # foundation-model announcements (open source, tooling, enterprise, smaller players).
 _BIG_LABS = {"openai", "anthropic", "google", "meta", "nvidia", "mistral"}
+
+
+# 채점 루브릭 (옵션 비교용 — --rubric 플래그로 선택)
+_RUBRIC_STANDARD = (
+    "높게 평가: 주요 연구소(OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek 등)의 "
+    "플래그십 모델 공개·프리뷰; 규제/수출통제/정책/대형 파트너십·사업 변동 같은 산업 이동 사건; "
+    "보안 취약점·사고; 서로 다른 독립 출처가 함께 다룬(교차검증된) 사건.\n"
+)
+_RUBRIC_SOTA = (
+    "채점 위계:\n"
+    "최상위(90-100): 프론티어 3사(OpenAI, Anthropic, Google)의 SOTA/플래그십 모델 공개·프리뷰. "
+    "그리고 이미 출시된 SOTA 모델에 대한 배포 중단·킬스위치·수출통제·재배포·리콜 같은 "
+    "라이프사이클 개입 사건 — 출시보다 드물고 파급이 크므로, '후속 보도'라는 이유로 "
+    "감점하지 말고 오히려 출시급 이상으로 평가해.\n"
+    "높게(70-89): 그 외 주요 연구소(Meta, Mistral, DeepSeek 등)의 모델 공개; "
+    "규제/정책/대형 파트너십·사업 변동 같은 산업 이동 사건; 보안 취약점·사고; "
+    "서로 다른 독립 출처가 함께 다룬(교차검증된) 사건.\n"
+)
+_RUBRICS = {"standard": _RUBRIC_STANDARD, "sota": _RUBRIC_SOTA}
 
 
 _GENERIC_TITLES = {
@@ -330,7 +349,7 @@ def _pick_with_diversity(
     return selected[:limit]
 
 
-def _llm_score(pool: list[Article]) -> list[RankedArticle]:
+def _llm_score(pool: list[Article], rubric: str = "standard") -> list[RankedArticle]:
     client = OpenAI()
     model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     payload = [
@@ -349,16 +368,19 @@ def _llm_score(pool: list[Article]) -> list[RankedArticle]:
         "너는 금융/공공/엔터프라이즈 독자를 위한 주간 AI 뉴스레터의 편집장이야. "
         "아래 후보 기사들을 '편집자적 뉴스가치(newsworthiness)' 기준으로 0~100점으로 채점해. "
         "키워드가 몇 개 들어갔는지가 아니라, 업계에 실제로 얼마나 중요한 사건인지로 판단해.\n"
-        "높게 평가: 주요 연구소(OpenAI, Anthropic, Google, Meta, Mistral, DeepSeek 등)의 "
-        "플래그십 모델 공개·프리뷰; 규제/수출통제/정책/대형 파트너십·사업 변동 같은 산업 이동 사건; "
-        "보안 취약점·사고; 서로 다른 독립 출처가 함께 다룬(교차검증된) 사건.\n"
+        f"{_RUBRICS.get(rubric, _RUBRIC_STANDARD)}"
         "낮게 평가: 키워드만 많은 GitHub 레포, 일반 튜토리얼, 사소한 점진적 업데이트, 홍보성 글, "
         "정보량 없는 목록/카테고리 페이지.\n"
         "각 기사에 topic_key를 부여해. topic_key는 '그 기사가 다루는 실제 사건/제품'을 나타내는 짧은 "
         "영문 슬러그이고, 같은 사건을 다룬 서로 다른 기사는 반드시 같은 topic_key를 가져야 해 "
         "(예: 'claude-sonnet-5', 'gpt-5.6-sol', 'fable-5-redeploy'). 코드명과 정식명은 같은 키로 묶어.\n"
+        "각 기사에 뉴스레터 섹션도 배정해. section은 다음 중 하나: "
+        "frontier(대형 연구소의 모델 공개·정책·규제·파트너십·사업 변동), "
+        "open(오픈웨이트 모델·GitHub/Hugging Face 오픈소스 생태계), "
+        "research(논문·벤치마크·기법 연구), tooling(개발 도구·인프라·보안).\n"
         "반드시 {\"items\":[{\"index\":정수, \"importance\":0-100 정수, \"topic_key\":\"슬러그\", "
         "\"category\":\"model|research|policy|security|industry|tooling|other\", "
+        "\"section\":\"frontier|open|research|tooling\", "
         "\"reason\":\"한 문장 한국어\"}]} 형태의 JSON만 반환해. 모든 index를 빠짐없이 포함해.\n\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
     )
@@ -390,6 +412,7 @@ def _llm_score(pool: list[Article]) -> list[RankedArticle]:
         ranked.score_breakdown = {"llm_importance": float(importance)}
         ranked.topic_key = str(row.get("topic_key") or _heuristic_topic_key(article))
         ranked.category = str(row.get("category") or "other")
+        ranked.section = str(row.get("section") or "")
         ranked.reason = str(row.get("reason") or "편집자 뉴스가치 기준으로 선별")
         scored.append(ranked)
     return scored
@@ -482,3 +505,4 @@ def _editorial_report(
             "diversity": "출처당 최대 2건, 벤더당 최대 3건",
         },
     }
+

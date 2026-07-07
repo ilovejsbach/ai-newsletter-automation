@@ -50,7 +50,11 @@ class RankedArticle(Article):
     score_breakdown: dict[str, float] = Field(default_factory=dict)
     topic_key: str = ""
     category: str = ""
+    section: str = ""
     reason: str = ""
+    one_liner: str = ""
+    hook: str = ""
+    related_coverage: list[str] = Field(default_factory=list)
     korean_title: str = ""
     korean_summary: str = ""
     why_it_matters: str = ""
@@ -78,6 +82,8 @@ class NewsletterPackage(BaseModel):
     period_start: datetime
     period_end: datetime
     title: str
+    overview: str = ""
+    thumbnails: bool = True
     articles: list[RankedArticle]
     issues: list[Issue] = Field(default_factory=list)
     quality_report: dict[str, Any] = Field(default_factory=dict)
@@ -86,3 +92,4 @@ class NewsletterPackage(BaseModel):
 
 class SourceList(BaseModel):
     sources: list[SourceConfig]
+

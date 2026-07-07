@@ -1,0 +1,56 @@
+# Social signal sources (panel: social) — 게시 대상이 아니라 신호용입니다.
+# 이 소스의 글은 뉴스레터에 실리지 않고, 같은 토픽을 다룬 본편 기사에
+# 가점(social boost)을 주고 "업계의 움직임" 슬롯의 재료(related_coverage)가 됩니다.
+#
+# YouTube 채널 추가 방법:
+#   1) 채널 페이지 소스에서 channel_id (UC로 시작) 확인
+#   2) url: https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxx
+#
+# Threads Keyword Search API는 앱 심사 통과 후 kind: threads-search 수집기로 추가 예정 (ROADMAP #5)
+
+sources:
+  - id: hn-ai-top
+    name: Hacker News (AI 100+ points)
+    kind: rss
+    url: https://hnrss.org/newest?q=AI+OR+LLM&points=100
+    language: en
+    panel: social
+    authority_tier: 0.6
+    enabled: true
+
+  - id: reddit-localllama
+    name: Reddit r/LocalLLaMA (주간 상위)
+    kind: rss
+    url: https://www.reddit.com/r/LocalLLaMA/top/.rss?t=week
+    language: en
+    panel: social
+    authority_tier: 0.5
+    enabled: true
+
+  - id: reddit-machinelearning
+    name: Reddit r/MachineLearning (주간 상위)
+    kind: rss
+    url: https://www.reddit.com/r/MachineLearning/top/.rss?t=week
+    language: en
+    panel: social
+    authority_tier: 0.5
+    enabled: true
+
+  - id: simonwillison-blog
+    name: Simon Willison Blog
+    kind: rss
+    url: https://simonwillison.net/atom/everything/
+    language: en
+    panel: social
+    authority_tier: 0.7
+    enabled: true
+
+  # 예시 placeholder — channel_id 확인 후 enabled: true로 변경
+  - id: yt-example-channel
+    name: (예시) YouTube AI 채널
+    kind: rss
+    url: https://www.youtube.com/feeds/videos.xml?channel_id=UC_CHANNEL_ID_HERE
+    language: en
+    panel: social
+    authority_tier: 0.6
+    enabled: false
