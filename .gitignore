@@ -9,3 +9,5 @@ outputs_latest/
 out*/
 _diag_images/
 .pytest_cache/
+logs/
+benchmarks/

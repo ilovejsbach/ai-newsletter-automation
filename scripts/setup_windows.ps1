@@ -119,4 +119,22 @@ if ($browsers) {
     Warn "No Chrome/Edge found. Screenshot image capture will be skipped (og:image still works)."
 }
 
+# --- 4. playwright chromium (PNG capture, OPTIONAL) ---------------------------
+# PNG 캡처는 설치된 Chrome/Edge를 우선 사용하므로 이 다운로드는 선택 사항입니다.
+# 사내 SSL 프록시에서는 다운로드가 막힐 수 있어, 패치된 certifi 번들을 Node가
+# 신뢰하도록 NODE_EXTRA_CA_CERTS를 지정해 시도합니다. 실패해도 무해합니다.
+if ($browsers) {
+    Info "Chrome/Edge found — skipping playwright chromium download (system browser is used for capture)."
+} else {
+    Info "No Chrome/Edge — attempting playwright chromium download (~150MB)..."
+    try {
+        $env:NODE_EXTRA_CA_CERTS = $certifi
+        & $venvPython -m playwright install chromium
+        Info "playwright chromium ready."
+    } catch {
+        Warn "playwright chromium install failed: $($_.Exception.Message)"
+        Warn "Install Chrome or Edge instead — capture uses the system browser."
+    }
+}
+
 Info "Done. Next: copy .env.example to .env, fill OPENAI_API_KEY, then 'uv run ai-newsletter build'."

@@ -300,3 +300,30 @@ uv run ai-newsletter build --days 7 --limit 10  # OpenAI로 한국어 편집(키
 | 줄바꿈/경로 | `/` | `\` (스크립트는 자동 처리) |
 
 개발 환경이 달라도 **코드/설정은 동일**합니다. 플랫폼 차이는 위 표의 설치·환경 단계에서만 발생하며, 애플리케이션 동작은 같습니다.
+
+## PNG 캡처 준비 (playwright)
+
+배포용 PNG는 Python playwright로 캡처하며, **이미 설치된 Chrome/Edge를 그대로 사용**합니다.
+Chrome 또는 Edge가 있으면 별도 브라우저 다운로드가 필요 없습니다 — `uv sync`만 하면 끝.
+
+- chromium 번들을 굳이 받으려면 `uv run playwright install chromium` (선택).
+  사내 SSL 검사 프록시에서는 `SELF_SIGNED_CERT_IN_CHAIN`으로 실패할 수 있는데,
+  Node 다운로더가 사내 CA를 신뢰하도록 지정하면 우회됩니다:
+
+  ```bat
+  set NODE_EXTRA_CA_CERTS=%CD%\.venv\Lib\site-packages\certifi\cacert.pem
+  uv run playwright install chromium
+  ```
+  (certifi 번들은 `scripts/setup_windows.ps1`이 사내 CA를 이미 추가해 둔 상태여야 합니다)
+
+- 캡처 실패해도 빌드는 계속되고, 실패 사유가 `board/image_post/image_manifest.json`에 기록됩니다.
+
+## HTML / PNG 단계 분리
+
+| 명령 | 하는 일 |
+|---|---|
+| `build` | 수집 + LLM + HTML + PNG + 게시 zip (전체) |
+| `build --no-capture` | PNG 생략 (빠른 확인용) |
+| `rerender <폴더>` | 기존 데이터로 HTML만 재생성 (디자인 반복용, 기본 PNG 생략) |
+| `rerender <폴더> --capture` | HTML + PNG 모두 재생성 |
+| `capture <폴더>` | 기존 HTML로 PNG·게시 zip만 생성 |

@@ -1,0 +1,51 @@
+# 벤치마크 레퍼런스 패널 — 공신력 있는 외신의 AI 보도 (선별 대상 아님, 비교 기준).
+# `ai-newsletter benchmark <산출물폴더>`가 이 패널의 최근 1주 보도와
+# 우리 선정 결과의 토픽 일치도를 측정합니다.
+# 매체 추가/교체 자유 — 단 "그 주에 무엇을 크게 다뤘나"의 기준이 되므로
+# 종합 신뢰도가 높은 매체 위주로 유지하세요.
+
+sources:
+  - id: ref-techcrunch-ai
+    name: TechCrunch AI
+    kind: rss
+    url: https://techcrunch.com/category/artificial-intelligence/feed/
+    language: en
+    panel: reference
+    authority_tier: 0.8
+    enabled: true
+
+  - id: ref-theverge-ai
+    name: The Verge AI
+    kind: rss
+    url: https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+    language: en
+    panel: reference
+    authority_tier: 0.8
+    enabled: true
+
+  - id: ref-venturebeat-ai
+    name: VentureBeat AI
+    kind: rss
+    url: https://venturebeat.com/category/ai/feed/
+    language: en
+    panel: reference
+    authority_tier: 0.7
+    enabled: true
+
+  - id: ref-arstechnica-ai
+    name: Ars Technica AI
+    kind: rss
+    url: https://arstechnica.com/ai/feed/
+    language: en
+    panel: reference
+    authority_tier: 0.8
+    enabled: true
+
+  - id: ref-mit-tech-review
+    name: MIT Technology Review
+    kind: rss
+    url: https://www.technologyreview.com/feed/
+    language: en
+    panel: reference
+    authority_tier: 0.9
+    enabled: true

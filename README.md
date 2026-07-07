@@ -28,7 +28,7 @@ uv sync
 # 3) 실행
 uv run ai-newsletter                 # 하위 명령 없이 실행하면 대화형으로 진입 (옵션을 물어보며 생성)
 uv run ai-newsletter sample
-uv run ai-newsletter build --days 7 --limit 10
+uv run ai-newsletter build --days 7 --limit 10   # 기본: sectioned 모드 + 소셜 신호 + editorial 테마 + 썸네일 + PNG
 uv run ai-newsletter build --days 7 --limit 10 --env-file /Users/koscom/workspace/koscom_report/.env
 ```
 
@@ -76,9 +76,15 @@ outputs/
 
 내부망 전송 대상은 `outputs/publish_ready/YYYY-MM-DD_ai_weekly/ai_weekly_YYYYMMDD_publish_package.zip`입니다.
 
+같은 날짜에 여러 번 빌드하면 이전 작업을 덮어쓰지 않고 `_v2`, `_v3` 접미사로 나란히 저장됩니다
+(예: `2026-07-06_weekly_ai_newsletter_v2`, `publish_ready/2026-07-06_ai_weekly_v2`).
+패키지 내부 파일명(UiPath 계약)은 접미사와 무관하게 동일합니다.
+
 ## Windows/UiPath PC 운영
 
-망간 전송이 가능한 Windows PC에서는 저장소를 clone 또는 압축 해제한 뒤, `uv sync`로 의존성을 맞추고 `ai-newsletter build`를 주 1회 실행합니다. 상세 절차는 [docs/WINDOWS_UIPATH_RUNBOOK.md](docs/WINDOWS_UIPATH_RUNBOOK.md)를 기준으로 합니다.
+망간 전송이 가능한 Windows PC에서는 저장소를 clone한 뒤 `scripts\run_weekly.ps1`을
+작업 스케줄러에 주 1회 등록합니다. 스크립트가 빌드→PNG 검증→UiPath 감시 폴더 투하(+`.done` 마커)까지
+자동 수행합니다. 상세 절차는 [docs/WINDOWS_UIPATH_RUNBOOK.md](docs/WINDOWS_UIPATH_RUNBOOK.md)를 기준으로 합니다.
 
 ## 현재 중요도 루브릭
 
