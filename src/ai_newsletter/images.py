@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -42,20 +43,29 @@ CHROME_CANDIDATES = [
 ]
 
 
-def capture_article_images(articles: list[RankedArticle], output_dir: Path) -> None:
+def capture_article_images(
+    articles: list[RankedArticle], output_dir: Path, max_workers: int = 4
+) -> None:
     image_dir = output_dir / "assets" / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
-    chrome = _find_chrome()
-    if not chrome:
-        chrome = ""
-    for idx, article in enumerate(articles, 1):
+    chrome = _find_chrome() or ""
+
+    def _process(item: tuple[int, RankedArticle]) -> None:
+        idx, article = item
+        # Each article writes to its own file and sets its own local_image, and
+        # _capture_with_chrome uses a unique --user-data-dir, so this is thread-safe.
         if _download_primary_image(article, idx, image_dir):
-            continue
+            return
         if not chrome:
-            continue
+            return
         target = image_dir / f"article_{idx:02d}_{article.id}.png"
         if _capture_with_chrome(chrome, article.url, target):
             article.local_image = f"assets/images/{target.name}"
+
+    if not articles:
+        return
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        list(executor.map(_process, enumerate(articles, 1)))
 
 
 def _find_chrome() -> str | None:
