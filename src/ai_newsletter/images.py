@@ -10,7 +10,13 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .models import RankedArticle
+from .editorial_selection import _heuristic_topic_key
+from .models import Article, RankedArticle
+
+# A screenshot smaller than this is treated as blank / a bot-challenge page
+# (e.g. Cloudflare's "just a moment" wall renders almost all-white and compresses
+# to a tiny PNG). Real content screenshots are far larger.
+_MIN_MEANINGFUL_SHOT_BYTES = 25000
 
 
 def _windows_browser_candidates() -> list[str]:
@@ -44,23 +50,36 @@ CHROME_CANDIDATES = [
 
 
 def capture_article_images(
-    articles: list[RankedArticle], output_dir: Path, max_workers: int = 4
+    articles: list[RankedArticle],
+    output_dir: Path,
+    donors: list[Article] | None = None,
+    max_workers: int = 4,
 ) -> None:
     image_dir = output_dir / "assets" / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
     chrome = _find_chrome() or ""
+    donor_pool = donors or []
 
     def _process(item: tuple[int, RankedArticle]) -> None:
         idx, article = item
         # Each article writes to its own file and sets its own local_image, and
         # _capture_with_chrome uses a unique --user-data-dir, so this is thread-safe.
-        if _download_primary_image(article, idx, image_dir):
+        # 1) the article's own image (og:image / content image).
+        if _download_image_urls(article.image_urls, idx, article, image_dir):
             return
-        if not chrome:
+        # 2) a screenshot of the article's own page (rejected if blank/challenge).
+        if chrome and _screenshot_for(chrome, article.url, idx, article, image_dir):
             return
-        target = image_dir / f"article_{idx:02d}_{article.id}.png"
-        if _capture_with_chrome(chrome, article.url, target):
-            article.local_image = f"assets/images/{target.name}"
+        # 3) borrow from the most-related coverage that has a real image. OpenAI
+        #    pages are Cloudflare-blocked (403 / challenge), so fall back to another
+        #    outlet's article on the same model/product.
+        donor = _best_donor(article, donor_pool)
+        if donor is None:
+            return
+        if _download_image_urls(donor.image_urls, idx, article, image_dir):
+            return
+        if chrome:
+            _screenshot_for(chrome, donor.url, idx, article, image_dir)
 
     if not articles:
         return
@@ -114,8 +133,10 @@ def _capture_with_chrome(chrome: str, url: str, target: Path) -> bool:
     return result.returncode == 0 and target.exists() and target.stat().st_size > 2048
 
 
-def _download_primary_image(article: RankedArticle, idx: int, image_dir: Path) -> bool:
-    for image_url in article.image_urls:
+def _download_image_urls(
+    image_urls: list[str], idx: int, article: RankedArticle, image_dir: Path
+) -> bool:
+    for image_url in image_urls:
         if not _looks_like_content_image(image_url):
             continue
         suffix = _image_suffix(image_url)
@@ -134,6 +155,42 @@ def _download_primary_image(article: RankedArticle, idx: int, image_dir: Path) -
             article.local_image = f"assets/images/{target.name}"
             return True
     return False
+
+
+def _screenshot_for(
+    chrome: str, url: str, idx: int, article: RankedArticle, image_dir: Path
+) -> bool:
+    target = (image_dir / f"article_{idx:02d}_{article.id}.png").resolve()
+    if not _capture_with_chrome(chrome, url, target):
+        return False
+    if target.exists() and target.stat().st_size >= _MIN_MEANINGFUL_SHOT_BYTES:
+        article.local_image = f"assets/images/{target.name}"
+        return True
+    # Drop blank/challenge captures so they are not referenced as an "image".
+    try:
+        target.unlink()
+    except OSError:
+        pass
+    return False
+
+
+def _best_donor(article: RankedArticle, donors: list[Article]) -> Article | None:
+    """The related-coverage article (same model/product) that has a real image."""
+    key = _heuristic_topic_key(article)
+    if key == article.id:  # no recognizable entity -> can't match related coverage safely
+        return None
+    best: Article | None = None
+    for donor in donors:
+        if donor.id == article.id or not donor.image_urls:
+            continue
+        if _heuristic_topic_key(donor) != key:
+            continue
+        if best is None or (donor.source_weight, len(donor.image_urls)) > (
+            best.source_weight,
+            len(best.image_urls),
+        ):
+            best = donor
+    return best
 
 
 def _looks_like_content_image(url: str) -> bool:

@@ -62,7 +62,7 @@ def write_package(
     )
     article_dir = output_dir / "articles"
     article_dir.mkdir(parents=True, exist_ok=True)
-    capture_article_images(selected, output_dir)
+    capture_article_images(selected, output_dir, donors=candidates)
     for idx, article in enumerate(selected, 1):
         (article_dir / article_filename(idx, article)).write_text(
             render_article_html(package, idx, article),
