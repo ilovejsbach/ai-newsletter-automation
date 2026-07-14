@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from html import escape
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -72,14 +73,18 @@ def capture_article_images(
             return
         # 3) borrow from the most-related coverage that has a real image. OpenAI
         #    pages are Cloudflare-blocked (403 / challenge), so fall back to another
-        #    outlet's article on the same model/product.
+        #    outlet's article on the same model/product; record the credit.
         donor = _best_donor(article, donor_pool)
-        if donor is None:
-            return
-        if _download_image_urls(donor.image_urls, idx, article, image_dir):
-            return
+        if donor is not None:
+            if _download_image_urls(donor.image_urls, idx, article, image_dir):
+                article.image_credit = donor.source_name
+                return
+            if chrome and _screenshot_for(chrome, donor.url, idx, article, image_dir):
+                article.image_credit = donor.source_name
+                return
+        # 4) last resort: a branded placeholder so the board/PNG path still has an image.
         if chrome:
-            _screenshot_for(chrome, donor.url, idx, article, image_dir)
+            _render_placeholder(chrome, article, idx, image_dir)
 
     if not articles:
         return
@@ -100,7 +105,7 @@ def _find_chrome() -> str | None:
     return None
 
 
-def _capture_with_chrome(chrome: str, url: str, target: Path) -> bool:
+def _capture_with_chrome(chrome: str, url: str, target: Path, virtual_time_ms: int = 10000) -> bool:
     # Chrome's --screenshot flag only reliably writes to an ABSOLUTE path; a
     # relative path is resolved against Chrome's own working directory and fails
     # with "path not found" (this silently broke all captures on Windows).
@@ -120,7 +125,8 @@ def _capture_with_chrome(chrome: str, url: str, target: Path) -> bool:
         "--window-size=1280,820",
         # Give JS-rendered (SPA) pages time to paint before the screenshot is
         # taken, otherwise sites like openai.com capture as a blank white page.
-        "--virtual-time-budget=10000",
+        # Static local HTML (placeholders) can use a much smaller budget.
+        f"--virtual-time-budget={virtual_time_ms}",
         f"--screenshot={str(target)}",
         url,
     ]
@@ -171,6 +177,39 @@ def _screenshot_for(
         target.unlink()
     except OSError:
         pass
+    return False
+
+
+def _render_placeholder(chrome: str, article: RankedArticle, idx: int, image_dir: Path) -> bool:
+    """Rasterize a branded card so donor-less articles still yield a board PNG."""
+    source = escape(article.source_name or "AI Weekly")
+    title = escape((article.korean_title or article.title or "")[:80])
+    html = (
+        "<!doctype html><html><head><meta charset='utf-8'></head>"
+        "<body style='margin:0'>"
+        "<div style='width:1280px;height:720px;box-sizing:border-box;display:flex;"
+        "flex-direction:column;justify-content:center;padding:88px;color:#e6edf3;"
+        "font-family:\"Malgun Gothic\",\"Segoe UI\",sans-serif;"
+        "background:linear-gradient(135deg,#0f766e,#0b3b57);'>"
+        f"<div style='font-size:30px;font-weight:800;letter-spacing:.04em;opacity:.85'>{source}</div>"
+        f"<div style='font-size:52px;font-weight:800;line-height:1.25;margin-top:26px'>{title}</div>"
+        "<div style='margin-top:auto;font-size:22px;opacity:.7'>AI Weekly Brief</div>"
+        "</div></body></html>"
+    )
+    fd, path = tempfile.mkstemp(suffix=".html")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(html)
+        target = (image_dir / f"article_{idx:02d}_{article.id}.png").resolve()
+        if _capture_with_chrome(chrome, Path(path).resolve().as_uri(), target, virtual_time_ms=500):
+            if target.exists() and target.stat().st_size > 4096:
+                article.local_image = f"assets/images/{target.name}"
+                return True
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
     return False
 
 

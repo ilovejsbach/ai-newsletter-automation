@@ -62,6 +62,7 @@ class RankedArticle(Article):
     detail_intro: str = ""
     detail_sections: list[dict[str, str]] = Field(default_factory=list)
     local_image: str = ""
+    image_credit: str = ""
 
 
 class Issue(BaseModel):

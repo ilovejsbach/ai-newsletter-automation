@@ -1485,7 +1485,18 @@ def _article_card(index: int, article: RankedArticle) -> str:
 def render_article_html(package: NewsletterPackage, index: int, article: RankedArticle) -> str:
     title = article.korean_title or article.title
     image = _image_src(article, detail=True)
-    img = f'<img class="detail-image" src="{escape(image)}" alt="기사 이미지">' if image else ""
+    if image and article.image_credit:
+        img = (
+            f'<figure class="detail-image-wrap" style="margin:0">'
+            f'<img class="detail-image" src="{escape(image)}" alt="기사 이미지">'
+            f'<figcaption class="image-credit" style="font-size:12px;opacity:.6;margin-top:4px">'
+            f'이미지 출처: {escape(article.image_credit)}</figcaption>'
+            f'</figure>'
+        )
+    elif image:
+        img = f'<img class="detail-image" src="{escape(image)}" alt="기사 이미지">'
+    else:
+        img = ""
     terms = " ".join(f"<span>{escape(str(term))}</span>" for term in article.terms[:8])
     intro = article.detail_intro or article.korean_summary or article.summary or "요약 없음"
     detail_sections = article.detail_sections or _fallback_detail_sections(article)
