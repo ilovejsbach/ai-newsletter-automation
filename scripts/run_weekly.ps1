@@ -49,11 +49,32 @@ function Fail($code, $m) {
     Stop-Transcript | Out-Null
     exit $code
 }
+# uv/git 등 native 명령은 진행상황을 stderr로 출력하는 경우가 많다.
+# $ErrorActionPreference="Stop" 상태에서 2>&1로 stderr를 합치면
+# 그 정상 출력(예: "Resolved 39 packages in 2ms")까지 터미널 오류로 처리돼
+# 즉시 catch 블록으로 빠지는 PowerShell 특유의 함정이 있다.
+# 이 헬퍼는 native 명령 실행 구간만 EAP를 Continue로 낮춰 그 문제를 피하고,
+# 성공/실패 판정은 항상 $LASTEXITCODE로 한다.
+function Invoke-Native([scriptblock]$Command) {
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Command 2>&1 | ForEach-Object { Write-Host $_ }
+    }
+    finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
 
 try {
     # --- 환경 점검 ------------------------------------------------------------
     # 스케줄러 컨텍스트에는 사용자 PATH가 없을 수 있어 uv 위치를 보강한다.
     $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+    # 콘솔 출력이 파이프(2>&1 | ForEach-Object)로 리다이렉트되면 Python은 실제 콘솔이 아니라고 보고
+    # 한국어 Windows 시스템 코드페이지(cp949)로 stdout을 인코딩한다. rich가 출력하는 em-dash(—) 같은
+    # cp949에 없는 문자를 만나면 UnicodeEncodeError로 빌드가 죽는다. UTF-8을 강제해 이를 막는다.
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { Fail 4 "uv를 찾을 수 없습니다 (PATH 확인)" }
     if (-not (Test-Path (Join-Path $RepoRoot ".env"))) { Fail 4 ".env가 없습니다 (OPENAI_API_KEY 필요)" }
     New-Item -ItemType Directory -Force -Path $DropDir | Out-Null
@@ -61,12 +82,12 @@ try {
     Info "repo=$RepoRoot drop=$DropDir days=$Days limit=$Limit"
 
     # --- 의존성 동기화 ---------------------------------------------------------
-    uv sync 2>&1 | ForEach-Object { Write-Host $_ }
+    Invoke-Native { uv sync }
     if ($LASTEXITCODE -ne 0) { Fail 4 "uv sync 실패" }
 
     # --- 빌드 (기본값: sectioned + 소셜 신호 + 테마 + 썸네일 + PNG + 게시 zip) ---
     $buildStart = Get-Date
-    uv run ai-newsletter build --days $Days --limit $Limit 2>&1 | ForEach-Object { Write-Host $_ }
+    Invoke-Native { uv run ai-newsletter build --days $Days --limit $Limit }
     if ($LASTEXITCODE -ne 0) { Fail 1 "build 실패 (로그 확인: $logFile)" }
 
     # --- 이번 실행이 만든 산출물 찾기 -------------------------------------------
@@ -79,7 +100,9 @@ try {
     # --- PNG 캡처 검증 ----------------------------------------------------------
     $manifestPath = Join-Path $outputDir.FullName "board\image_post\image_manifest.json"
     if (-not (Test-Path $manifestPath)) { Fail 2 "image_manifest.json 없음 — 캡처 단계 미실행" }
-    $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    # Python은 manifest를 UTF-8로 쓴다. PS 5.1의 Get-Content 기본 인코딩(cp949)으로 읽으면
+    # 한글 라벨이 깨지고 JSON 구조가 망가져 ConvertFrom-Json이 실패한다 → 반드시 UTF8로 읽는다.
+    $manifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $created = @($manifest | Where-Object { $_.created }).Count
     Info "PNG 캡처: $created/$($manifest.Count)"
     if ($created -lt $MinPngCount) {
@@ -108,7 +131,7 @@ try {
     # grounding 경고가 있으면 로그에 남겨 사람 검토를 유도
     $reportPath = Join-Path $outputDir.FullName "data\generation_report.json"
     if (Test-Path $reportPath) {
-        $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+        $report = Get-Content $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $flagCount = @($report.grounding_flags).Count
         if ($flagCount -gt 0) {
             Info "주의: grounding_flags $flagCount 건 — 게시 전 원문 대조 권장 ($reportPath)"
@@ -121,6 +144,8 @@ try {
 }
 catch {
     Write-Host "[weekly] 예기치 못한 오류: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[weekly]   위치: 라인 $($_.InvocationInfo.ScriptLineNumber) - $($_.InvocationInfo.Line.Trim())" -ForegroundColor Red
+    Write-Host "[weekly]   대상 명령: $($_.InvocationInfo.MyCommand)" -ForegroundColor Red
     Stop-Transcript | Out-Null
     exit 1
 }
