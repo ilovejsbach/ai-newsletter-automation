@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from pathlib import Path
@@ -60,36 +61,48 @@ def capture_article_images(
     image_dir.mkdir(parents=True, exist_ok=True)
     chrome = _find_chrome() or ""
     donor_pool = donors or []
-
-    def _process(item: tuple[int, RankedArticle]) -> None:
-        idx, article = item
-        # Each article writes to its own file and sets its own local_image, and
-        # _capture_with_chrome uses a unique --user-data-dir, so this is thread-safe.
-        # 1) the article's own image (og:image / content image).
-        if _download_image_urls(article.image_urls, idx, article, image_dir):
-            return
-        # 2) a screenshot of the article's own page (rejected if blank/challenge).
-        if chrome and _screenshot_for(chrome, article.url, idx, article, image_dir):
-            return
-        # 3) borrow from the most-related coverage that has a real image. OpenAI
-        #    pages are Cloudflare-blocked (403 / challenge), so fall back to another
-        #    outlet's article on the same model/product; record the credit.
-        donor = _best_donor(article, donor_pool)
-        if donor is not None:
-            if _download_image_urls(donor.image_urls, idx, article, image_dir):
-                article.image_credit = donor.source_name
-                return
-            if chrome and _screenshot_for(chrome, donor.url, idx, article, image_dir):
-                article.image_credit = donor.source_name
-                return
-        # 4) last resort: a branded placeholder so the board/PNG path still has an image.
-        if chrome:
-            _render_placeholder(chrome, article, idx, image_dir)
-
     if not articles:
         return
+
+    used_urls: set[str] = set()
+    lock = threading.Lock()
+
+    def _remember(url: str) -> None:
+        with lock:
+            used_urls.add(url)
+
+    # Phase 1 (parallel): each article's OWN image. og:image download, else a
+    # screenshot of its own page (rejected if blank / bot-challenge). Independent
+    # per article, so it is safe to run concurrently.
+    def _own(item: tuple[int, RankedArticle]) -> None:
+        idx, article = item
+        url = _download_image_urls(article.image_urls, idx, article, image_dir)
+        if url:
+            _remember(url)
+            return
+        if chrome:
+            _screenshot_for(chrome, article.url, idx, article, image_dir)
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        list(executor.map(_process, enumerate(articles, 1)))
+        list(executor.map(_own, enumerate(articles, 1)))
+
+    # Phase 2 (sequential): borrow for the rest, NEVER reusing an image already
+    # taken by another article — otherwise two OpenAI stories both grab the same
+    # AlphaSignal card and look identical. If no fresh donor image exists, use a
+    # branded placeholder (unique per article, on-topic title).
+    for idx, article in enumerate(articles, 1):
+        if article.local_image:
+            continue
+        donor = _best_donor(article, donor_pool)
+        if donor is not None:
+            fresh = [u for u in donor.image_urls if u not in used_urls]
+            url = _download_image_urls(fresh, idx, article, image_dir)
+            if url:
+                used_urls.add(url)
+                article.image_credit = donor.source_name
+                continue
+        if chrome:
+            _render_placeholder(chrome, article, idx, image_dir)
 
 
 def _find_chrome() -> str | None:
@@ -141,7 +154,8 @@ def _capture_with_chrome(chrome: str, url: str, target: Path, virtual_time_ms: i
 
 def _download_image_urls(
     image_urls: list[str], idx: int, article: RankedArticle, image_dir: Path
-) -> bool:
+) -> str:
+    """Download the first usable image; returns the URL used (falsy "" on failure)."""
     for image_url in image_urls:
         if not _looks_like_content_image(image_url):
             continue
@@ -159,8 +173,8 @@ def _download_image_urls(
             continue
         if target.exists() and target.stat().st_size > 4096:
             article.local_image = f"assets/images/{target.name}"
-            return True
-    return False
+            return image_url
+    return ""
 
 
 def _screenshot_for(
