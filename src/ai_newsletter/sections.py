@@ -236,21 +236,46 @@ def select_sectioned_articles(
     return selected, report
 
 
+def _owner_key(article: RankedArticle) -> str | None:
+    """Repo owner for GitHub/HF items, so one prolific author (e.g. api-evangelist
+    posting many near-identical repos) can't take multiple slots that look alike."""
+    url = article.url.lower()
+    match = re.search(r"github\.com/([^/]+)/", url)
+    if match:
+        return f"github:{match.group(1)}"
+    if article.source_id.startswith("huggingface"):
+        match = re.search(r"huggingface\.co/([^/]+)/", url)
+        if match:
+            return f"hf:{match.group(1)}"
+    return None
+
+
 def _fill_quotas(
     ranked: list[RankedArticle],
     *,
     limit: int,
     quotas: dict[str, int],
     per_source_limit: int,
+    per_owner_limit: int = 1,
 ) -> tuple[list[RankedArticle], list[str]]:
     selected: list[RankedArticle] = []
     selected_ids: set[str] = set()
     source_counts: dict[str, int] = {}
+    owner_counts: dict[str, int] = {}
+
+    def _blocked(article: RankedArticle) -> bool:
+        if source_counts.get(article.source_id, 0) >= per_source_limit:
+            return True
+        owner = _owner_key(article)
+        return bool(owner and owner_counts.get(owner, 0) >= per_owner_limit)
 
     def _admit(article: RankedArticle) -> None:
         selected.append(article)
         selected_ids.add(article.id)
         source_counts[article.source_id] = source_counts.get(article.source_id, 0) + 1
+        owner = _owner_key(article)
+        if owner:
+            owner_counts[owner] = owner_counts.get(owner, 0) + 1
 
     # Phase 1: guarantee each section a MINIMUM (quota-1, at least 1) so the
     # structure survives, but don't let quotas consume the whole issue — that
@@ -264,7 +289,7 @@ def _fill_quotas(
                 break
             if article.section != sec or article.id in selected_ids:
                 continue
-            if source_counts.get(article.source_id, 0) >= per_source_limit:
+            if _blocked(article):
                 continue
             _admit(article)
             count += 1
@@ -272,14 +297,14 @@ def _fill_quotas(
             shortfalls.append(sec)
 
     # Phase 2: remaining slots go to the best stories globally, section-blind
-    # (source cap still applies). A strong week for one section can now earn
-    # it an extra slot instead of forcing weak picks elsewhere.
+    # (source + owner caps still apply). A strong week for one section can now
+    # earn it an extra slot instead of forcing weak picks elsewhere.
     for article in ranked:
         if len(selected) >= limit:
             break
         if article.id in selected_ids:
             continue
-        if source_counts.get(article.source_id, 0) >= per_source_limit:
+        if _blocked(article):
             continue
         _admit(article)
 
