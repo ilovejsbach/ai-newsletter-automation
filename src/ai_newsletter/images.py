@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from openai import OpenAI
 
 from .editorial_selection import _heuristic_topic_key
 from .models import Article, RankedArticle
@@ -56,6 +59,8 @@ def capture_article_images(
     output_dir: Path,
     donors: list[Article] | None = None,
     max_workers: int = 4,
+    generate_images: bool = True,
+    max_generated: int = 6,
 ) -> None:
     image_dir = output_dir / "assets" / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -86,12 +91,21 @@ def capture_article_images(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(executor.map(_own, enumerate(articles, 1)))
 
-    # Phase 2 (sequential): borrow for the rest, NEVER reusing an image already
-    # taken by another article — otherwise two OpenAI stories both grab the same
-    # AlphaSignal card and look identical. If no fresh donor image exists, use a
-    # branded placeholder (unique per article, on-topic title).
+    # Phase 2 (sequential): fill the rest. Generation is preferred over borrowing
+    # because a borrowed image is often a generic newsletter card that is off-topic
+    # or repeated across articles; a generated illustration is on-topic, on-brand
+    # (the company's logo), and unique. Borrowing stays as a fallback when
+    # generation is disabled/capped/fails, and never reuses an image already taken.
+    #   3) generate an on-topic branded illustration
+    #   4) borrow a fresh (unused) image from the most-related coverage
+    #   5) branded placeholder
+    generated = 0
+    can_generate = generate_images and bool(os.getenv("OPENAI_API_KEY"))
     for idx, article in enumerate(articles, 1):
         if article.local_image:
+            continue
+        if can_generate and generated < max_generated and _generate_image(article, idx, image_dir):
+            generated += 1
             continue
         donor = _best_donor(article, donor_pool)
         if donor is not None:
@@ -191,6 +205,72 @@ def _screenshot_for(
         target.unlink()
     except OSError:
         pass
+    return False
+
+
+# Company -> logo, for an on-brand generated illustration (internal newsletter,
+# no trademark concern). Matched against title/summary/source.
+_COMPANY_PATTERNS: list[tuple[str, str]] = [
+    ("OpenAI", r"\bopenai\b|\bgpt[-\s]?\d|chatgpt|\bcodex\b|\bsora\b"),
+    ("Anthropic", r"\banthropic\b|\bclaude\b|\bfable\b"),
+    ("Google", r"\bgoogle\b|deepmind|gemini|gemma|nano\s*banana"),
+    ("Meta", r"\bmeta\b|\bllama\b"),
+    ("NVIDIA", r"\bnvidia\b|nemotron"),
+    ("Mistral AI", r"\bmistral\b"),
+    ("Microsoft", r"\bmicrosoft\b|copilot|\bazure\b"),
+    ("Hugging Face", r"hugging\s*face|huggingface"),
+]
+
+
+def _company_of(article: RankedArticle) -> str | None:
+    text = f"{article.title} {article.summary} {article.source_id}".lower()
+    for name, pattern in _COMPANY_PATTERNS:
+        if re.search(pattern, text):
+            return name
+    return None
+
+
+def _generate_image(article: RankedArticle, idx: int, image_dir: Path) -> bool:
+    """Generate an on-topic editorial illustration when no real image is available.
+
+    Uses the article's title/summary/category and, when a company is recognized,
+    asks for that company's logo (internal newsletter, so this is intentional).
+    In-image headline/caption text is forbidden because generated text comes out
+    garbled — the headline is shown separately in HTML. Credited as AI 생성.
+    """
+    title = article.korean_title or article.title
+    summary = (article.korean_summary or article.summary or "")[:300]
+    category = article.category or ""
+    company = _company_of(article)
+    logo_line = (
+        f"{company}의 공식 로고 심볼을 화면에 또렷하고 눈에 띄게 배치하고, " if company else ""
+    )
+    prompt = (
+        "AI 주간 뉴스레터용 에디토리얼 일러스트레이션. "
+        f"주제: {title}. 맥락: {summary}. 카테고리: {category}. "
+        f"{logo_line}"
+        "칩·성장 그래프 등 주제와 관련된 기술 상징을 곁들여. "
+        "깔끔하고 프로페셔널한 현대적 톤, 차분한 색조, 내부 뉴스레터용. "
+        "중요: 제목·헤드라인·문장·설명·캡션 같은 텍스트나 숫자는 이미지 안에 절대 그리지 말 것. "
+        "로고 심볼만 허용."
+    )
+    try:
+        client = OpenAI()
+        response = client.images.generate(
+            model="gpt-image-1", prompt=prompt, size="1536x1024", quality="low", n=1
+        )
+        data = base64.b64decode(response.data[0].b64_json)
+    except Exception:
+        return False
+    target = image_dir / f"article_{idx:02d}_{article.id}.png"
+    try:
+        target.write_bytes(data)
+    except OSError:
+        return False
+    if target.exists() and target.stat().st_size > 4096:
+        article.local_image = f"assets/images/{target.name}"
+        article.image_credit = "AI 생성"
+        return True
     return False
 
 
