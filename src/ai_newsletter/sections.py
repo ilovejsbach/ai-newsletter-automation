@@ -22,6 +22,7 @@ import re
 from .models import Article, RankedArticle
 from .editorial_selection import (
     _BIG_LABS,
+    _completeness_check,
     _heuristic_score,
     _heuristic_topic_key,
     _is_publishable,
@@ -188,6 +189,10 @@ def select_sectioned_articles(
         ranked, limit=limit, quotas=quotas, per_source_limit=per_source_limit
     )
 
+    # Completeness safety net: an LLM second opinion that catches a MAJOR story
+    # left in the candidate pool but dropped by scoring/quotas (the Kimi case).
+    selected, critic_notes = _completeness_check(selected, ranked, limit=limit, use_llm=use_llm)
+
     # Present articles in fixed section order (importance within a section).
     order = {sec: idx for idx, sec in enumerate(SECTION_ORDER)}
     selected.sort(key=lambda a: (order.get(a.section, len(order)), -a.score))
@@ -211,6 +216,7 @@ def select_sectioned_articles(
             "topics_with_signal": len(social_hits),
             "boosted_articles": social_matched,
         },
+        "completeness_promotions": critic_notes,
         # 낙선 이유 추적용: 상위 25위까지 전체 순위 (selected=False가 탈락자)
         "ranking": [
             {

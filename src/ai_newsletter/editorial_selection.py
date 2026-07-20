@@ -267,6 +267,84 @@ def _recency_ts(article: RankedArticle) -> float:
     return article.published_at.timestamp() if article.published_at else 0.0
 
 
+def _completeness_check(
+    selected: list[RankedArticle],
+    ranked_pool: list[RankedArticle],
+    *,
+    limit: int,
+    use_llm: bool = True,
+    max_promote: int = 2,
+) -> tuple[list[RankedArticle], list[str]]:
+    """Safety net: ask the LLM whether any MAJOR industry story that was a
+    candidate got dropped by scoring/quotas, and swap it in for the weakest pick.
+
+    This is the systemic guard against 'missing the week's biggest story' — it
+    catches the case where the story WAS collected (e.g. Kimi K3) but selection
+    logic left it out. It cannot recover a story that was never a candidate.
+    """
+    if not use_llm or not os.getenv("OPENAI_API_KEY"):
+        return selected, []
+    selected_ids = {a.id for a in selected}
+    unselected = sorted(
+        (a for a in ranked_pool if a.id not in selected_ids),
+        key=lambda a: a.score,
+        reverse=True,
+    )[:40]
+    if not unselected:
+        return selected, []
+    sel_payload = [{"title": a.title, "source": a.source_name} for a in selected]
+    un_payload = [
+        {
+            "index": i,
+            "title": a.title,
+            "source": a.source_name,
+            "hn_points": int(a.metrics.get("hn_points") or 0),
+        }
+        for i, a in enumerate(unselected)
+    ]
+    prompt = (
+        "너는 주간 AI 뉴스레터 편집장이야. 아래 '선정된 기사'와 '탈락 후보'를 비교해, "
+        "탈락 후보 중 이번 주 업계의 MAJOR 사건인데 빠지면 안 되는 것을 고른다. "
+        "MAJOR = 플래그십 모델 출시/프리뷰, 대형 자금·인수합병, 규제·정책 변화, "
+        "커뮤니티를 뒤덮은 바이럴 기술 돌파구. 선정 기사들보다 명백히 더 큰 뉴스일 때만 고르고 "
+        "애매하면 고르지 마. 지어내지 말고 반드시 주어진 index만 사용.\n"
+        f"최대 {max_promote}개. 반드시 JSON만 반환: "
+        '{"missing":[{"index":정수, "reason":"한 문장 한국어"}]} (없으면 빈 배열).\n\n'
+        f"선정된 기사: {json.dumps(sel_payload, ensure_ascii=False)}\n\n"
+        f"탈락 후보: {json.dumps(un_payload, ensure_ascii=False)}"
+    )
+    try:
+        client = OpenAI()
+        model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
+        response = client.responses.create(
+            model=model, input=prompt, text={"format": {"type": "json_object"}}
+        )
+        usage.record(response)
+        data = json.loads(response.output_text)
+    except Exception:
+        return selected, []
+    rows = data.get("missing") if isinstance(data, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return selected, []
+    result = list(selected)
+    notes: list[str] = []
+    for row in rows[:max_promote]:
+        idx = row.get("index") if isinstance(row, dict) else None
+        if not isinstance(idx, int) or idx < 0 or idx >= len(unselected):
+            continue
+        promote = unselected[idx]
+        if promote.id in {a.id for a in result}:
+            continue
+        weakest = min(result, key=lambda a: a.score)
+        result = [a for a in result if a.id != weakest.id]
+        promote.reason = f"완전성 크리틱 편입: {row.get('reason') or '이번 주 major 사건'}"
+        result.append(promote)
+        notes.append(
+            f"편입 '{promote.title[:50]}' (사유: {row.get('reason', '')}) / 대체 '{weakest.title[:40]}'"
+        )
+    return result, notes
+
+
 def _prefer(candidate: RankedArticle, current: RankedArticle) -> bool:
     """Prefer the higher-scored article for a topic; break ties toward official sources."""
     if candidate.score != current.score:
