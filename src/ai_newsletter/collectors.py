@@ -83,6 +83,8 @@ class Collector:
             return self.collect_github(source, days)
         if source.kind == "huggingface":
             return self.collect_huggingface(source, days)
+        if source.kind == "hnsearch":
+            return self.collect_hnsearch(source, days)
         return []
 
     def collect_rss(self, source: SourceConfig, days: int) -> list[Article]:
@@ -279,6 +281,63 @@ class Collector:
             )
         return articles
 
+    def collect_hnsearch(self, source: SourceConfig, days: int) -> list[Article]:
+        """Promote stories dominating Hacker News into publishable candidates.
+
+        HN/Reddit are otherwise boost-only, so a story that overwhelms the feed
+        (e.g. Kimi K3 at 2000+ points) had no publishable article to represent it
+        and vanished. Query the HN Algolia API for the window's top stories by
+        points, keep the AI-related ones, and pull each linked article in as a
+        real candidate. HN points ride along in metrics as a strength signal.
+        """
+        min_points = 200
+        since = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
+        api = (
+            "https://hn.algolia.com/api/v1/search"
+            f"?tags=story&numericFilters=created_at_i>{since},points>{min_points}"
+            f"&hitsPerPage={max(self.options.per_source_limit, 40)}"
+        )
+        resp = self.client.get(api)
+        resp.raise_for_status()
+        data = resp.json()
+        articles: list[Article] = []
+        for hit in data.get("hits", []):
+            if len(articles) >= self.options.per_source_limit:
+                break
+            link = hit.get("url")
+            title = unescape(hit.get("title") or "").strip()
+            # Ask HN / text posts have no external URL; skip non-AI top stories.
+            if not link or not title or not _hn_looks_ai(title):
+                continue
+            created = hit.get("created_at_i")
+            published = datetime.fromtimestamp(created, timezone.utc) if created else None
+            if self.options.strict_week and published and published < (
+                datetime.now(timezone.utc) - timedelta(days=days)
+            ):
+                continue
+            body, images = self.fetch_article_detail(link)
+            articles.append(
+                Article(
+                    id=stable_id(link),
+                    source_id=source.id,
+                    source_name=source.name,
+                    title=title,
+                    url=link.strip(),
+                    published_at=published,
+                    summary=(strip_html(body)[:600] if body else title),
+                    body=body,
+                    image_urls=images[:3],
+                    metrics={
+                        "hn_points": int(hit.get("points") or 0),
+                        "hn_comments": int(hit.get("num_comments") or 0),
+                    },
+                    source_weight=source.weight,
+                    panel=source.panel,
+                    authority_tier=source.authority_tier,
+                )
+            )
+        return articles
+
     def fetch_article_detail(self, url: str) -> tuple[str, list[str]]:
         try:
             resp = self.client.get(url)
@@ -350,6 +409,20 @@ def _looks_ai_related(text: str) -> bool:
             re.I,
         )
     )
+
+
+# HN top-story titles often omit generic AI words (e.g. "Kimi K3", "Qwen 3.8",
+# "Grok Build"), so also match known model/lab names to keep dominant stories.
+_HN_AI_RE = re.compile(
+    r"\b(ai|artificial intelligence|llm|agent|gpt|chatgpt|claude|gemini|gemma|model|models|"
+    r"openai|anthropic|deepmind|hugging ?face|kimi|moonshot|qwen|grok|llama|mistral|deepseek|"
+    r"glm|nemotron|phi|open[- ]?weight|multimodal|inference)\b",
+    re.I,
+)
+
+
+def _hn_looks_ai(title: str) -> bool:
+    return bool(_HN_AI_RE.search(title))
 
 
 def _meta_content(soup: BeautifulSoup, key: str) -> str | None:

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 class SourceConfig(BaseModel):
     id: str
     name: str
-    kind: Literal["rss", "webpage", "github", "huggingface"]
+    kind: Literal["rss", "webpage", "github", "huggingface", "hnsearch"]
     url: str | None = None
     query: str | None = None
     language: str = "en"

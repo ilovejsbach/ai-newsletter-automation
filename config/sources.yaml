@@ -117,6 +117,15 @@ sources:
     enabled: true
 
 
+  - id: hn-trending
+    name: HN Trending (AI)
+    kind: hnsearch
+    language: en
+    weight: 1.05
+    panel: curator
+    authority_tier: 0.7
+    enabled: true
+
   - id: github-ai-trending
     name: GitHub AI Repositories
     kind: github
