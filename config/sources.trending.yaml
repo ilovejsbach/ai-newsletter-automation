@@ -1,0 +1,19 @@
+# Trending sources — publishable, opt-in. Load with:  build --include-trending
+#
+# Surfaces stories that are DOMINATING the feed (by community signal) but that our
+# regular publishable sources happened to miss. HN/Reddit are otherwise boost-only,
+# so a story overwhelming the feed (e.g. Kimi K3 at 2000+ points) would vanish from
+# the newsletter. The hnsearch collector queries the HN Algolia API for the window's
+# top stories by points, keeps AI-related ones, and pulls each linked article in as
+# a real candidate (with hn_points as a strength signal).
+
+sources:
+  - id: hn-trending
+    name: HN Trending (AI)
+    kind: hnsearch
+    language: en
+    weight: 1.05
+    panel: curator
+    authority_tier: 0.7
+    source_set: trending
+    enabled: true

@@ -111,6 +111,14 @@ def build(
     social_sources: Path = typer.Option(
         Path("config/sources.social.yaml"), help="Social signal source YAML for --include-social."
     ),
+    include_trending: bool = typer.Option(
+        True,
+        help="Also collect trending sources (config/sources.trending.yaml) — HN-dominating "
+        "stories (e.g. Kimi K3) pulled in as publishable candidates. --no-include-trending로 끌 수 있음.",
+    ),
+    trending_sources: Path = typer.Option(
+        Path("config/sources.trending.yaml"), help="Trending source YAML for --include-trending."
+    ),
     capture: bool = typer.Option(
         True, help="PNG 캡처·게시 패키지 생성 여부. --no-capture면 HTML까지만 (나중에 `capture` 명령으로 보완)."
     ),
@@ -145,6 +153,8 @@ def build(
         candidate_sources=candidate_sources,
         include_social=include_social,
         social_sources=social_sources,
+        include_trending=include_trending,
+        trending_sources=trending_sources,
         capture=capture,
         theme=theme,
         thumbs=thumbs,
@@ -171,6 +181,8 @@ def _run_build(
     candidate_sources: Path = Path("config/sources.candidate.yaml"),
     include_social: bool = False,
     social_sources: Path = Path("config/sources.social.yaml"),
+    include_trending: bool = False,
+    trending_sources: Path = Path("config/sources.trending.yaml"),
     capture: bool = True,
     theme: str = "editorial",
     thumbs: bool = True,
@@ -204,6 +216,17 @@ def _run_build(
                 existing_ids.add(s.id)
                 added += 1
         console.print(f"[cyan]소셜 신호 소스 {added}개 포함 (게시 제외, 부스팅 전용)[/cyan]")
+    if include_trending and trending_sources and trending_sources.exists():
+        trending_list = load_sources(trending_sources)
+        existing_ids = {s.id for s in all_sources}
+        added = 0
+        for s in trending_list.sources:
+            s.source_set = "trending"
+            if s.id not in existing_ids:
+                all_sources.append(s)
+                existing_ids.add(s.id)
+                added += 1
+        console.print(f"[cyan]트렌딩 소스 {added}개 포함 (피드 장악 화제 승격)[/cyan]")
     source_sets = {s.id: s.source_set for s in all_sources}
     if selection_mode == "latest":
         require_dates = True
@@ -475,6 +498,9 @@ def _interactive() -> None:
         "소셜 신호 소스(YouTube/HN/Reddit — 게시 제외, 부스팅 전용)도 포함할까요?",
         default=(selection_mode == "sectioned"),
     )
+    include_trending = Confirm.ask(
+        "트렌딩 소스(HN 장악 화제 — Kimi K3 등 게시 후보 승격)도 포함할까요?", default=True
+    )
 
     console.print(f"디자인 테마: {_THEME_MENU}")
     theme_pick = Prompt.ask("번호", choices=["1", "2", "3", "4"], default="1", show_choices=False)
@@ -494,7 +520,7 @@ def _interactive() -> None:
         f"  모드=[cyan]{selection_mode}[/cyan]  기간={days}일  기사수={limit}  "
         f"LLM={'예' if use_llm else '아니오'}  테마=[cyan]{theme}[/cyan]  "
         f"소셜신호={'예' if include_social else '아니오'}  후보소스={'예' if include_candidates else '아니오'}  "
-        f"PNG캡처={'예' if do_capture else '아니오'}  출력={output}"
+        f"트렌딩={'예' if include_trending else '아니오'}  PNG캡처={'예' if do_capture else '아니오'}  출력={output}"
     )
     if selection_mode == "latest" and latest_source_ids:
         console.print(f"  지정 사이트={latest_source_ids}  보강={'예' if latest_fill else '아니오'}")
@@ -519,6 +545,7 @@ def _interactive() -> None:
         per_source_limit=20,
         include_candidates=include_candidates,
         include_social=include_social,
+        include_trending=include_trending,
         capture=do_capture,
         theme=theme,
         thumbs=do_thumbs,
