@@ -15,6 +15,7 @@ backfilled globally so the issue still reaches `limit` articles.
 
 from __future__ import annotations
 
+import math
 import os
 import re
 
@@ -125,6 +126,17 @@ def select_sectioned_articles(
     if not scored:
         scored = _heuristic_score(pool)
         mode = "sectioned-heuristic"
+
+    # HN-points boost: a story dominating Hacker News is objectively the week's
+    # biggest, but the LLM newsworthiness rubric can't see the point count. Add a
+    # log-scaled bonus so feed-dominating stories (e.g. Kimi K3 at 2000+ points)
+    # actually rank up instead of losing a section slot to lesser picks.
+    for article in scored:
+        points = int(article.metrics.get("hn_points") or 0)
+        if points >= 100:
+            bonus = min(25.0, 9.0 * math.log10(points / 50.0))
+            article.score = round(article.score + bonus, 3)
+            article.score_breakdown = {**article.score_breakdown, "hn_boost": round(bonus, 2)}
 
     for article in scored:
         if article.section not in SECTION_ORDER:
@@ -262,6 +274,10 @@ def _fill_quotas(
     selected_ids: set[str] = set()
     source_counts: dict[str, int] = {}
     owner_counts: dict[str, int] = {}
+    section_counts: dict[str, int] = {}
+
+    def _sec(article: RankedArticle) -> str:
+        return article.section if article.section in quotas else SECTION_ORDER[-1]
 
     def _blocked(article: RankedArticle) -> bool:
         if source_counts.get(article.source_id, 0) >= per_source_limit:
@@ -276,35 +292,40 @@ def _fill_quotas(
         owner = _owner_key(article)
         if owner:
             owner_counts[owner] = owner_counts.get(owner, 0) + 1
+        section_counts[_sec(article)] = section_counts.get(_sec(article), 0) + 1
 
-    # Phase 1: guarantee each section a MINIMUM (quota-1, at least 1) so the
-    # structure survives, but don't let quotas consume the whole issue — that
-    # was dropping a top-5 frontier story in favor of a 40-point filler.
-    minimums = {sec: max(1, quota - 1) for sec, quota in quotas.items()}
+    # Phase 1: fill each section UP TO its quota (a ceiling, not a minimum), best
+    # first. This is what makes the sectioned mode actually proportional — one hot
+    # section can no longer eat the whole issue.
     shortfalls: list[str] = []
     for sec in SECTION_ORDER:
-        count = 0
         for article in ranked:
-            if count >= minimums.get(sec, 0):
+            if section_counts.get(sec, 0) >= quotas.get(sec, 0):
                 break
-            if article.section != sec or article.id in selected_ids:
-                continue
-            if _blocked(article):
+            if _sec(article) != sec or article.id in selected_ids or _blocked(article):
                 continue
             _admit(article)
-            count += 1
-        if count < minimums.get(sec, 0):
+        if section_counts.get(sec, 0) < quotas.get(sec, 0):
             shortfalls.append(sec)
 
-    # Phase 2: remaining slots go to the best stories globally, section-blind
-    # (source + owner caps still apply). A strong week for one section can now
-    # earn it an extra slot instead of forcing weak picks elsewhere.
+    # Phase 2: leftover slots (from short sections) go to the best remaining, but a
+    # section may exceed its quota by at most `overflow` so it can't balloon.
+    overflow = 1
     for article in ranked:
         if len(selected) >= limit:
             break
-        if article.id in selected_ids:
+        if article.id in selected_ids or _blocked(article):
             continue
-        if _blocked(article):
+        if section_counts.get(_sec(article), 0) >= quotas.get(_sec(article), 0) + overflow:
+            continue
+        _admit(article)
+
+    # Phase 3: last resort — if still short (sections capped/exhausted), fill with
+    # the best remaining regardless of section so the issue still reaches `limit`.
+    for article in ranked:
+        if len(selected) >= limit:
+            break
+        if article.id in selected_ids or _blocked(article):
             continue
         _admit(article)
 
