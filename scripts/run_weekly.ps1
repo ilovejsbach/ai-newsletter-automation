@@ -91,18 +91,29 @@ try {
     if ($LASTEXITCODE -ne 0) { Fail 1 "build 실패 (로그 확인: $logFile)" }
 
     # --- 이번 실행이 만든 산출물 찾기 -------------------------------------------
-    $outputDir = Get-ChildItem (Join-Path $RepoRoot "outputs") -Directory |
-        Where-Object { $_.Name -match "^\d{4}-\d{2}-\d{2}_weekly_ai_newsletter" -and $_.LastWriteTime -ge $buildStart } |
+    # @()로 배열 고정. 타임스탬프 필터가 (프로필/타이밍 등 환경 차이로) 비면
+    # 가장 최근 산출물 폴더로 폴백해 mysterious null 크래시를 방어한다.
+    $matching = @(Get-ChildItem (Join-Path $RepoRoot "outputs") -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match "^\d{4}-\d{2}-\d{2}_weekly_ai_newsletter" })
+    $outputDir = $matching |
+        Where-Object { $_.LastWriteTime -ge $buildStart } |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $outputDir) { Fail 3 "이번 실행의 산출물 폴더를 찾지 못했습니다" }
+    if (-not $outputDir) {
+        $outputDir = $matching | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    }
+    if (-not $outputDir -or [string]::IsNullOrEmpty($outputDir.FullName)) {
+        Fail 3 "산출물 폴더를 찾지 못했습니다 (outputs 아래 매칭 폴더 $($matching.Count)개)"
+    }
     Info "산출물: $($outputDir.Name)"
 
     # --- PNG 캡처 검증 ----------------------------------------------------------
     $manifestPath = Join-Path $outputDir.FullName "board\image_post\image_manifest.json"
-    if (-not (Test-Path $manifestPath)) { Fail 2 "image_manifest.json 없음 — 캡처 단계 미실행" }
+    if ([string]::IsNullOrEmpty($manifestPath) -or -not (Test-Path -LiteralPath $manifestPath)) {
+        Fail 2 "image_manifest.json 없음 — 캡처 단계 미실행 ($manifestPath)"
+    }
     # Python은 manifest를 UTF-8로 쓴다. PS 5.1의 Get-Content 기본 인코딩(cp949)으로 읽으면
     # 한글 라벨이 깨지고 JSON 구조가 망가져 ConvertFrom-Json이 실패한다 → 반드시 UTF8로 읽는다.
-    $manifest = Get-Content $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $created = @($manifest | Where-Object { $_.created }).Count
     Info "PNG 캡처: $created/$($manifest.Count)"
     if ($created -lt $MinPngCount) {
