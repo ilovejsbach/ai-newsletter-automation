@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from openai import OpenAI
 
@@ -135,8 +136,13 @@ def enrich_with_openai(
     # 경우가 있어(RemoteProtocolError) 작은 배치로 나눠 보낸다. 배치가 실패해도
     # 빌드를 죽이지 않고, 남은 기사는 아래 개별 재시도(_enrich_one)가 처리한다.
     batch_size = max(1, int(os.getenv("ENRICH_BATCH_SIZE", "4")))
-    for start in range(0, len(articles), batch_size):
-        chunk = list(enumerate(articles))[start : start + batch_size]
+    max_workers = max(1, int(os.getenv("ENRICH_WORKERS", "4")))
+    indexed = list(enumerate(articles))
+    batches = [indexed[start : start + batch_size] for start in range(0, len(indexed), batch_size)]
+
+    # Batches are independent (each writes to its own articles), and httpx is
+    # thread-safe, so run them concurrently — enrich is the build's bottleneck.
+    def _run_batch(chunk: list[tuple[int, RankedArticle]]) -> None:
         payload = [_article_payload(idx, a) for idx, a in chunk]
         prompt = _build_enrich_prompt(payload, structured=structured)
         try:
@@ -148,7 +154,7 @@ def enrich_with_openai(
             usage.record(response)
             rows = _extract_rows(json.loads(response.output_text))
         except Exception:
-            continue  # 이 배치 기사들은 아래 개별 재시도로 넘어간다
+            return  # 이 배치 기사들은 아래 개별 재시도로 넘어간다
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -156,9 +162,20 @@ def enrich_with_openai(
             if not isinstance(idx, int) or idx < 0 or idx >= len(articles):
                 continue
             _apply_row(articles[idx], row, structured=structured)
-    for idx, article in enumerate(articles):
-        if _needs_retry(article):
-            _enrich_one(client, model, idx, article, structured=structured)
+
+    if batches:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(batches))) as executor:
+            list(executor.map(_run_batch, batches))
+
+    retries = [(idx, a) for idx, a in enumerate(articles) if _needs_retry(a)]
+    if retries:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(retries))) as executor:
+            list(
+                executor.map(
+                    lambda pair: _enrich_one(client, model, pair[0], pair[1], structured=structured),
+                    retries,
+                )
+            )
     return articles
 
 
