@@ -130,7 +130,12 @@ def enrich_with_openai(
 ) -> list[RankedArticle]:
     if not os.getenv("OPENAI_API_KEY"):
         return articles
-    client = OpenAI()
+    # Explicit timeout + limited retries: without this a large concurrent POST can
+    # hang on the corporate proxy indefinitely (the build stalled for hours). A
+    # legit batch finishes well under the timeout; a hung one fails fast and the
+    # article drops to the per-article retry below.
+    timeout = float(os.getenv("ENRICH_TIMEOUT", "150"))
+    client = OpenAI(timeout=timeout, max_retries=1)
     model = os.getenv("OPENAI_MODEL", "gpt-5.4")
     # 기사 10건×본문 9천자를 한 요청에 담으면 사내 프록시가 대형 POST를 끊는
     # 경우가 있어(RemoteProtocolError) 작은 배치로 나눠 보낸다. 배치가 실패해도
@@ -420,7 +425,7 @@ def generate_weekly_overview(articles: list[RankedArticle]) -> str:
     synthesized from the selected stories, shown at the top of the newsletter."""
     if not os.getenv("OPENAI_API_KEY") or not articles:
         return ""
-    client = OpenAI()
+    client = OpenAI(timeout=float(os.getenv("OPENAI_TIMEOUT", "120")), max_retries=1)
     model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     payload = [
         {
@@ -458,7 +463,7 @@ def evaluate_with_openai(articles: list[RankedArticle], report: dict[str, object
     if not os.getenv("OPENAI_API_KEY"):
         report["llm_evaluation"] = "OPENAI_API_KEY가 없어 휴리스틱 평가만 수행했습니다."
         return report
-    client = OpenAI()
+    client = OpenAI(timeout=float(os.getenv("OPENAI_TIMEOUT", "120")), max_retries=1)
     model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     # 평가에는 편집 결과 요약만 있으면 된다 — 원문 전문까지 보내면 요청이
     # 너무 커져 프록시가 끊을 수 있다.

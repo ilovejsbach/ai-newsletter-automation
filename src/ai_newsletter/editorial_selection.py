@@ -314,7 +314,7 @@ def _completeness_check(
         f"탈락 후보: {json.dumps(un_payload, ensure_ascii=False)}"
     )
     try:
-        client = OpenAI()
+        client = OpenAI(timeout=float(os.getenv("OPENAI_TIMEOUT", "120")), max_retries=1)
         model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
         response = client.responses.create(
             model=model, input=prompt, text={"format": {"type": "json_object"}}
@@ -428,7 +428,7 @@ def _pick_with_diversity(
 
 
 def _llm_score(pool: list[Article], rubric: str = "standard") -> list[RankedArticle]:
-    client = OpenAI()
+    client = OpenAI(timeout=float(os.getenv("OPENAI_TIMEOUT", "120")), max_retries=1)
     model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     payload = [
         {

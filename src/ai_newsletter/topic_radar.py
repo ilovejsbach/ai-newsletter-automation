@@ -55,7 +55,7 @@ def build_issue_radar(
 
 
 def _build_llm_issues(articles: list[RankedArticle], limit: int) -> list[Issue]:
-    client = OpenAI()
+    client = OpenAI(timeout=float(os.getenv("OPENAI_TIMEOUT", "120")), max_retries=1)
     model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
     payload = [
         {

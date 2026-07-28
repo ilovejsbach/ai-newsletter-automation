@@ -255,7 +255,7 @@ def _generate_image(article: RankedArticle, idx: int, image_dir: Path) -> bool:
         "로고 심볼만 허용."
     )
     try:
-        client = OpenAI()
+        client = OpenAI(timeout=float(os.getenv("OPENAI_TIMEOUT", "180")), max_retries=1)
         response = client.images.generate(
             model="gpt-image-1", prompt=prompt, size="1536x1024", quality="low", n=1
         )
