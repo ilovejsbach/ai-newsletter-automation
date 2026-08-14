@@ -1,0 +1,25 @@
+# Research sources — publishable, opt-in. Load with:  build --include-research
+#
+# The newsletter had no research source of any kind, which is why the "연구 & 논문"
+# section was empty or padded with GitHub repos every week — no classifier fix can
+# sort papers that were never collected.
+#
+# Ingesting arXiv wholesale is the opposite mistake: ~600 cs.AI submissions a week,
+# unranked. Hugging Face's daily papers feed is the same shape as the HN trending
+# source we use for news — a community upvote count that says which of the week's
+# papers people actually read. The collector links each entry to its arXiv original
+# and uses the abstract as the body, so there is no page to scrape.
+#
+# Weekly volume at the 5-upvote floor: ~44 papers, of which ~29 clear 10 upvotes.
+# The LLM importance score, the 40-point floor and the research quota do the rest.
+
+sources:
+  - id: hf-daily-papers
+    name: Hugging Face Daily Papers
+    kind: hfpapers
+    language: en
+    weight: 1.05
+    panel: model-hub
+    authority_tier: 0.7
+    source_set: research
+    enabled: true
