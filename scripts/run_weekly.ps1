@@ -24,6 +24,9 @@ param(
     [string]$DropDir = "C:\newsletter_outbox",
     [int]$Days = 7,
     [int]$Limit = 10,
+    # 선정 로직. heat = 발행사 기준 캡 + 화제 상위 확정 편입 + 누락 사유 기록.
+    [ValidateSet("sectioned", "heat", "editorial", "editorial-diverse", "consensus", "latest", "issue", "rank")]
+    [string]$SelectionMode = "sectioned",
     # 11장(메인1+기사10) 중 이 개수 미만이면 캡처 불완전으로 실패 처리
     [int]$MinPngCount = 11
 )
@@ -87,7 +90,8 @@ try {
 
     # --- 빌드 (기본값: sectioned + 소셜 신호 + 테마 + 썸네일 + PNG + 게시 zip) ---
     $buildStart = Get-Date
-    Invoke-Native { uv run ai-newsletter build --days $Days --limit $Limit }
+    Info "선정 모드: $SelectionMode"
+    Invoke-Native { uv run ai-newsletter build --days $Days --limit $Limit --selection-mode $SelectionMode }
     if ($LASTEXITCODE -ne 0) { Fail 1 "build 실패 (로그 확인: $logFile)" }
 
     # --- 이번 실행이 만든 산출물 찾기 -------------------------------------------
