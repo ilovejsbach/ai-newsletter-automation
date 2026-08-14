@@ -22,6 +22,7 @@ from .llm import (
 from .models import CollectionOptions
 from .ranking import build_quality_report, rank_articles
 from .render import make_output_dir, write_package
+from .heat_selection import select_heat_articles
 from .sections import select_sectioned_articles
 from .topic_radar import build_issue_radar
 from .usage import usage
@@ -29,9 +30,14 @@ from .usage import usage
 app = typer.Typer(help="Weekly AI newsletter crawler and HTML packager.")
 console = Console()
 
+# Modes that standardize every article body on the 4-part skeleton and get a
+# weekly overview. Adding a mode here opts it into the full sectioned layout.
+STRUCTURED_MODES = ("sectioned", "heat")
+
 # (key, one-line Korean description) for the interactive menu and help.
 MODE_CHOICES: list[tuple[str, str]] = [
     ("sectioned", "섹션 구성 — 섹션 최소보장 + 4단 본문 + 콜아웃 (기본)"),
+    ("heat", "열기 보장 — 발행사 기준 캡 + 화제 상위 확정 + 누락 사유 기록 (신규)"),
     ("issue", "이슈 레이더 — 주제로 묶어 선별"),
     ("latest", "최신 사이트 — 지정 사이트의 최근 1주 기사"),
     ("editorial", "편집자 — LLM 뉴스가치 채점 + 주제 중복제거"),
@@ -76,10 +82,12 @@ def build(
     limit: int = typer.Option(10, min=1, max=30, help="Number of main articles."),
     use_llm: bool = typer.Option(True, help="Use OpenAI for Korean editing and quality evaluation."),
     selection_mode: Literal[
-        "issue", "rank", "latest", "editorial", "editorial-diverse", "consensus", "sectioned"
+        "issue", "rank", "latest", "editorial", "editorial-diverse", "consensus",
+        "sectioned", "heat",
     ] = typer.Option(
         "sectioned",
         help="Article selection mode (기본: sectioned — 섹션 최소보장 + 4단 본문). "
+        "heat: 발행사(도메인) 기준 캡 + 화제 상위 확정 편입 + 정본 대표 선정 + 누락 사유 기록. "
         "그 외: issue radar, legacy ranking, latest dated articles, "
         "editorial (LLM newsworthiness + topic dedup), editorial-diverse, "
         "consensus (rank by how many sources cover the story).",
@@ -119,6 +127,14 @@ def build(
     trending_sources: Path = typer.Option(
         Path("config/sources.trending.yaml"), help="Trending source YAML for --include-trending."
     ),
+    include_research: bool = typer.Option(
+        True,
+        help="Also collect research sources (config/sources.research.yaml) — 커뮤니티 업보트 "
+        "상위 논문을 arXiv 원문 링크로 수집. 연구 섹션의 유일한 공급원. --no-include-research로 끌 수 있음.",
+    ),
+    research_sources: Path = typer.Option(
+        Path("config/sources.research.yaml"), help="Research source YAML for --include-research."
+    ),
     capture: bool = typer.Option(
         True, help="PNG 캡처·게시 패키지 생성 여부. --no-capture면 HTML까지만 (나중에 `capture` 명령으로 보완)."
     ),
@@ -155,6 +171,8 @@ def build(
         social_sources=social_sources,
         include_trending=include_trending,
         trending_sources=trending_sources,
+        include_research=include_research,
+        research_sources=research_sources,
         capture=capture,
         theme=theme,
         thumbs=thumbs,
@@ -183,6 +201,8 @@ def _run_build(
     social_sources: Path = Path("config/sources.social.yaml"),
     include_trending: bool = False,
     trending_sources: Path = Path("config/sources.trending.yaml"),
+    include_research: bool = False,
+    research_sources: Path = Path("config/sources.research.yaml"),
     capture: bool = True,
     theme: str = "editorial",
     thumbs: bool = True,
@@ -227,12 +247,23 @@ def _run_build(
                 existing_ids.add(s.id)
                 added += 1
         console.print(f"[cyan]트렌딩 소스 {added}개 포함 (피드 장악 화제 승격)[/cyan]")
+    if include_research and research_sources and research_sources.exists():
+        research_list = load_sources(research_sources)
+        existing_ids = {s.id for s in all_sources}
+        added = 0
+        for s in research_list.sources:
+            s.source_set = "research"
+            if s.id not in existing_ids:
+                all_sources.append(s)
+                existing_ids.add(s.id)
+                added += 1
+        console.print(f"[cyan]리서치 소스 {added}개 포함 (커뮤니티 업보트 상위 논문 + arXiv 원문)[/cyan]")
     source_sets = {s.id: s.source_set for s in all_sources}
     if selection_mode == "latest":
         require_dates = True
         strict_week = True
         issue_radar = False
-    if selection_mode in ("editorial", "editorial-diverse", "consensus", "sectioned"):
+    if selection_mode in ("editorial", "editorial-diverse", "consensus", *STRUCTURED_MODES):
         issue_radar = False
     collector = Collector(
         options=CollectionOptions(
@@ -310,6 +341,14 @@ def _run_build(
             social_articles=social_candidates,
             rubric=rubric,
         )
+    elif selection_mode == "heat":
+        selected, report = select_heat_articles(
+            candidates,
+            limit=limit,
+            use_llm=use_llm,
+            social_articles=social_candidates,
+            rubric=rubric,
+        )
     elif selection_mode == "rank" or not issue_radar:
         selected = rank_articles(candidates, limit=limit)
         report = build_quality_report(selected, candidates)
@@ -321,8 +360,8 @@ def _run_build(
     if use_llm:
         # Sectioned mode standardizes every article body on the purpose-driven
         # skeleton (무슨 일 / 섹션 특화 / 다른 곳의 움직임 / 우리에게 미치는 영향).
-        selected = enrich_with_openai(selected, structured=(selection_mode == "sectioned"))
-        if selection_mode == "sectioned":
+        selected = enrich_with_openai(selected, structured=(selection_mode in STRUCTURED_MODES))
+        if selection_mode in STRUCTURED_MODES:
             overview = generate_weekly_overview(selected)
             flags = grounding_flags(selected)
             report["grounding_flags"] = flags
@@ -496,10 +535,13 @@ def _interactive() -> None:
     )
     include_social = Confirm.ask(
         "소셜 신호 소스(YouTube/HN/Reddit — 게시 제외, 부스팅 전용)도 포함할까요?",
-        default=(selection_mode == "sectioned"),
+        default=(selection_mode in STRUCTURED_MODES),
     )
     include_trending = Confirm.ask(
         "트렌딩 소스(HN 장악 화제 — Kimi K3 등 게시 후보 승격)도 포함할까요?", default=True
+    )
+    include_research = Confirm.ask(
+        "리서치 소스(커뮤니티 업보트 상위 논문 + arXiv 원문)도 포함할까요?", default=True
     )
 
     console.print(f"디자인 테마: {_THEME_MENU}")
@@ -546,6 +588,7 @@ def _interactive() -> None:
         include_candidates=include_candidates,
         include_social=include_social,
         include_trending=include_trending,
+        include_research=include_research,
         capture=do_capture,
         theme=theme,
         thumbs=do_thumbs,

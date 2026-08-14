@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -40,6 +41,21 @@ def parse_datetime(value: str | None) -> datetime | None:
             return dt.astimezone(timezone.utc)
         except Exception:
             return None
+
+
+# A date past the end of the issue's own window is always wrong — a scheduled post,
+# a double-applied timezone, or a misread D/M. Publishing one undermines the letter,
+# so the window is closed at both ends. The tolerance absorbs clock and timezone
+# skew without letting a genuinely wrong date through.
+_FUTURE_TOLERANCE = timedelta(days=1)
+
+
+def _outside_window(published: datetime | None, cutoff: datetime) -> bool:
+    if published is None:
+        return False
+    if published < cutoff:
+        return True
+    return published > datetime.now(timezone.utc) + _FUTURE_TOLERANCE
 
 
 def parse_date_from_text(text: str) -> datetime | None:
@@ -85,6 +101,8 @@ class Collector:
             return self.collect_huggingface(source, days)
         if source.kind == "hnsearch":
             return self.collect_hnsearch(source, days)
+        if source.kind == "hfpapers":
+            return self.collect_hfpapers(source, days)
         return []
 
     def collect_rss(self, source: SourceConfig, days: int) -> list[Article]:
@@ -111,7 +129,7 @@ class Collector:
             )
             if self.options.require_dates and published is None:
                 continue
-            if self.options.strict_week and published and published < cutoff:
+            if self.options.strict_week and _outside_window(published, cutoff):
                 continue
             summary = strip_html(
                 _xml_text(entry, "description")
@@ -119,7 +137,9 @@ class Collector:
                 or _xml_text(entry, "content")
             )
             image_urls = _extract_images_from_xml(entry)
-            body, detail_images = self.fetch_article_detail(link) if title and link else ("", [])
+            body, detail_images, _ = (
+                self.fetch_article_detail(link) if title and link else ("", [], None)
+            )
             if title and link:
                 articles.append(
                     Article(
@@ -157,17 +177,19 @@ class Collector:
                 continue
             if not _looks_ai_related(title):
                 continue
-            published = parse_date_from_text(title)
+            body, image_urls, meta_published = self.fetch_article_detail(href)
+            # What the article says about itself beats anything guessed from the
+            # listing page around it.
+            published = meta_published or parse_date_from_text(title)
             if published is None:
                 nearby = link.find_parent(["article", "li", "div"])
                 if nearby is not None:
                     published = parse_date_from_text(nearby.get_text(" ", strip=True))
-            body, image_urls = self.fetch_article_detail(href)
             if published is None and body:
                 published = parse_date_from_text(body[:3000])
             if self.options.require_dates and published is None:
                 continue
-            if self.options.strict_week and published and published < cutoff:
+            if self.options.strict_week and _outside_window(published, cutoff):
                 continue
             articles.append(
                 Article(
@@ -281,6 +303,74 @@ class Collector:
             )
         return articles
 
+    def collect_hfpapers(self, source: SourceConfig, days: int) -> list[Article]:
+        """Papers the ML community actually upvoted, linked to the original arXiv entry.
+
+        The newsletter had no research source at all, so the research section spent
+        months either empty or padded with whatever GitHub repo scored least badly.
+        Ingesting arXiv wholesale is the opposite failure — roughly 600 cs.AI
+        submissions a week, none of them ranked. Hugging Face's daily papers feed
+        carries the community's upvote count, which is the same kind of signal HN
+        points give news: a way to tell which of the week's papers people actually
+        read. The upvote count rides along in `metrics` and feeds the heat index.
+        """
+        min_upvotes = 5
+        api = "https://huggingface.co/api/daily_papers?limit=100"
+        resp = self.client.get(api)
+        resp.raise_for_status()
+        payload = resp.json()
+        if not isinstance(payload, list):
+            return []
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        rows: list[tuple[int, Article]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            paper = item.get("paper")
+            if not isinstance(paper, dict):
+                continue
+            arxiv_id = str(paper.get("id") or "").strip()
+            title = unescape(str(paper.get("title") or "")).strip()
+            abstract = unescape(str(paper.get("summary") or "")).strip()
+            if not arxiv_id or not title:
+                continue
+            upvotes = int(paper.get("upvotes") or 0)
+            if upvotes < min_upvotes:
+                continue
+            published = parse_datetime(item.get("publishedAt") or paper.get("publishedAt"))
+            if self.options.strict_week and _outside_window(published, cutoff):
+                continue
+            if self.options.require_dates and not published:
+                continue
+            # Point at the paper itself — the abstract is the article, so there is
+            # no page to scrape and nothing to lose to a paywall or JS challenge.
+            url = f"https://arxiv.org/abs/{arxiv_id}"
+            rows.append(
+                (
+                    upvotes,
+                    Article(
+                        id=stable_id(url),
+                        source_id=source.id,
+                        source_name=source.name,
+                        title=title,
+                        url=url,
+                        published_at=published,
+                        summary=abstract[:600],
+                        body=abstract,
+                        metrics={
+                            "paper_upvotes": upvotes,
+                            "paper_comments": int(item.get("numComments") or 0),
+                            "stars": int(paper.get("githubStars") or 0),
+                        },
+                        source_weight=source.weight,
+                        panel=source.panel,
+                        authority_tier=source.authority_tier,
+                    ),
+                )
+            )
+        rows.sort(key=lambda row: row[0], reverse=True)
+        return [article for _, article in rows[: self.options.per_source_limit]]
+
     def collect_hnsearch(self, source: SourceConfig, days: int) -> list[Article]:
         """Promote stories dominating Hacker News into publishable candidates.
 
@@ -315,7 +405,7 @@ class Collector:
                 datetime.now(timezone.utc) - timedelta(days=days)
             ):
                 continue
-            body, images = self.fetch_article_detail(link)
+            body, images, _ = self.fetch_article_detail(link)
             articles.append(
                 Article(
                     id=stable_id(link),
@@ -338,13 +428,19 @@ class Collector:
             )
         return articles
 
-    def fetch_article_detail(self, url: str) -> tuple[str, list[str]]:
+    def fetch_article_detail(self, url: str) -> tuple[str, list[str], datetime | None]:
         try:
             resp = self.client.get(url)
             resp.raise_for_status()
         except Exception:
-            return "", []
+            return "", [], None
         soup = BeautifulSoup(resp.text, "html.parser")
+        # Read the date before the <script> tags are stripped — JSON-LD lives there,
+        # and it is the only place most blogs state the date unambiguously. Scanning
+        # page text with a regex instead made a Claude blog post dated Aug 07 arrive
+        # as Aug 14: the first date-shaped string on a listing page belongs to
+        # whatever the layout happened to put first, not to this article.
+        published = _published_from_metadata(soup)
         for node in soup.select("script, style, nav, footer, header, aside, form"):
             node.decompose()
         title = _meta_content(soup, "og:title") or ""
@@ -367,7 +463,43 @@ class Collector:
                 src = urljoin(url, img.get("src", ""))
                 if src.startswith("http"):
                     images.append(src)
-        return body[:12000], list(dict.fromkeys(images))
+        return body[:12000], list(dict.fromkeys(images)), published
+
+
+def _published_from_metadata(soup: BeautifulSoup) -> datetime | None:
+    """The date the page states about itself, in decreasing order of reliability."""
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for block in data if isinstance(data, list) else [data]:
+            if not isinstance(block, dict):
+                continue
+            for key in ("datePublished", "dateCreated", "uploadDate"):
+                parsed = parse_datetime(block.get(key)) or parse_date_from_text(
+                    str(block.get(key) or "")
+                )
+                if parsed:
+                    return parsed
+    for attrs in (
+        {"property": "article:published_time"},
+        {"name": "article:published_time"},
+        {"itemprop": "datePublished"},
+        {"name": "date"},
+        {"name": "pubdate"},
+    ):
+        tag = soup.find("meta", attrs=attrs)
+        if tag and tag.get("content"):
+            parsed = parse_datetime(tag["content"]) or parse_date_from_text(tag["content"])
+            if parsed:
+                return parsed
+    time_tag = soup.find("time", attrs={"datetime": True})
+    if time_tag:
+        parsed = parse_datetime(time_tag["datetime"])
+        if parsed:
+            return parsed
+    return None
 
 
 def _xml_text(entry: ET.Element, tag: str) -> str:

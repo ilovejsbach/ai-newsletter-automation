@@ -185,9 +185,17 @@ def _download_image_urls(
             target.write_bytes(response.content)
         except Exception:
             continue
-        if target.exists() and target.stat().st_size > 4096:
+        # A flat brand asset compresses to almost nothing even at full width: the
+        # Google "super G" arrived as a 1300px JPEG of just 17 KB and shipped as an
+        # article image. Size, not dimensions, is what separates a real photo or
+        # diagram from a logo, so hold downloads to the same bar as screenshots.
+        if target.exists() and target.stat().st_size >= _MIN_MEANINGFUL_SHOT_BYTES:
             article.local_image = f"assets/images/{target.name}"
             return image_url
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
     return ""
 
 

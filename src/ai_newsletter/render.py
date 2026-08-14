@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .models import Article, NewsletterPackage, RankedArticle
 from .models import Issue
+from .identity import display_publisher
 from .images import capture_article_images
 from .sections import SECTION_META, SECTION_ORDER
 
@@ -148,11 +149,11 @@ def write_publish_ready_package(package: NewsletterPackage) -> None:
         slots.append((f"ARTICLE_{idx:02d}", filename, article.korean_title or article.title))
 
     (publish_dir / "board_post_template.html").write_text(
-        render_publish_board_html(slots, use_placeholders=True),
+        render_publish_board_html(slots, use_placeholders=True, title=package.title),
         encoding="utf-8",
     )
     (publish_dir / "board_post_local_preview.html").write_text(
-        render_publish_board_html(slots, use_placeholders=False),
+        render_publish_board_html(slots, use_placeholders=False, title=package.title),
         encoding="utf-8",
     )
     with (publish_dir / "image_url_map.csv").open("w", newline="", encoding="utf-8-sig") as file:
@@ -195,7 +196,11 @@ def _placeholder(slot: str) -> str:
     return "{{IMG_" + slot + "_URL}}"
 
 
-def render_publish_board_html(slots: list[tuple[str, str, str]], use_placeholders: bool) -> str:
+def render_publish_board_html(
+    slots: list[tuple[str, str, str]],
+    use_placeholders: bool,
+    title: str = "AI 주간 뉴스레터",
+) -> str:
     n = len(slots)
     checked_tab_css = "\n  ".join(
         f'#slide{i}:checked ~ .tab-bar label[for="slide{i}"],' for i in range(1, n + 1)
@@ -215,9 +220,9 @@ def render_publish_board_html(slots: list[tuple[str, str, str]], use_placeholder
         f'<label for="slide{i}">{escape(label)}</label>' for i, label in enumerate(labels, 1)
     )
     slide_imgs = []
-    for slot, filename, title in slots:
+    for slot, filename, slot_title in slots:
         src = _placeholder(slot) if use_placeholders else f"../images/{filename}"
-        slide_imgs.append(f'<img src="{escape(src)}" alt="{escape(title)}">')
+        slide_imgs.append(f'<img src="{escape(src)}" alt="{escape(slot_title)}">')
     page_spans = "\n    ".join(
         f"<span>{escape(label)} / {n}</span>" for label in labels
     )
@@ -226,7 +231,7 @@ def render_publish_board_html(slots: list[tuple[str, str, str]], use_placeholder
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI 주간 뉴스레터</title>
+<title>{escape(title)}</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   html, body {{ background:#fff; }}
@@ -815,7 +820,7 @@ def render_namo_inline(package: NewsletterPackage, image_mode: str) -> str:
             line = article.hook or article.one_liner or article.korean_title or article.title
             body.append(
                 f'<li style="margin:6px 0;color:#333;">{escape(line)} '
-                f'<span style="color:#888;font-size:13px;">— {escape(article.source_name)}</span></li>'
+                f'<span style="color:#888;font-size:13px;">— {escape(display_publisher(article))}</span></li>'
             )
         body.append("</ul>")
         for sec in SECTION_ORDER:
@@ -862,7 +867,7 @@ def _namo_article_html(
     terms = ", ".join(str(term) for term in article.terms[:8])
     return f"""
 <div style="border-top:1px solid #ddd;padding:28px 0;">
-  <p style="margin:0 0 6px;color:#777;font-size:13px;">{idx:02d} · {escape(article.source_name)}</p>
+  <p style="margin:0 0 6px;color:#777;font-size:13px;">{idx:02d} · {escape(display_publisher(article))}</p>
   <h3 style="font-size:24px;line-height:1.36;margin:0 0 14px;color:#111;">{escape(title)}</h3>
   {image_html}
   <p style="font-size:17px;line-height:1.75;color:#333;background:#f8fafb;border-left:4px solid #0f766e;padding:12px 14px;margin:0 0 18px;">{escape(article.detail_intro or article.korean_summary or article.summary)}</p>
@@ -929,7 +934,7 @@ def _board_article_html(
     terms = ", ".join(str(term) for term in article.terms[:8])
     return f"""
 <article class="board-article" id="article-{idx:02d}">
-  <p class="board-source">{idx:02d} · {escape(article.source_name)}</p>
+  <p class="board-source">{idx:02d} · {escape(display_publisher(article))}</p>
   <h3>{escape(title)}</h3>
   {image_html}
   <p class="board-lead">{escape(article.detail_intro or article.korean_summary or article.summary)}</p>
@@ -963,7 +968,7 @@ def render_board_body(package: NewsletterPackage, image_mode: str, simple: bool 
             line = article.hook or article.one_liner or article.korean_title or article.title
             issue_html += (
                 f'<li><a href="#article-{idx:02d}">{escape(line)}</a> '
-                f"<span>— {escape(article.source_name)}</span></li>"
+                f"<span>— {escape(display_publisher(article))}</span></li>"
             )
         issue_html += "</ul></section>"
 
@@ -1207,7 +1212,7 @@ def render_issue_cards(package: NewsletterPackage) -> str:
             if article_id in by_id and article_id != representative.id
         ][:3]
         related_html = "".join(
-            f"<li>{escape(article.source_name)} · {escape(article.korean_title or article.title)}</li>"
+            f"<li>{escape(display_publisher(article))} · {escape(article.korean_title or article.title)}</li>"
             for article in related
         )
         related_block = f"<ul class=\"related-list\">{related_html}</ul>" if related_html else ""
@@ -1545,7 +1550,7 @@ def render_article_html(package: NewsletterPackage, index: int, article: RankedA
 def _article_meta(index: int, article: RankedArticle) -> str:
     published = _published_date(article)
     date = f' <span class="source-date">게시일 {escape(published)}</span>' if published else ""
-    return f'<span class="article-number">{index:02d}</span> {escape(article.source_name)}{date}'
+    return f'<span class="article-number">{index:02d}</span> {escape(display_publisher(article))}{date}'
 
 
 def _published_date(article: RankedArticle) -> str:
@@ -1665,7 +1670,11 @@ body { margin: 0; background: var(--wash); color: var(--ink); font-family: "Pret
 .kicker { margin: 0 0 8px; color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 h1 { margin: 0; font-size: 34px; line-height: 1.25; letter-spacing: 0; }
 .lead { margin: 14px 0 0; color: var(--muted); font-size: 17px; }
-.hero-image { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+/* `cover` on a fixed 4:3 box cropped wide og:images down the middle — a launch
+   banner reading "Advancing the price-performance frontier" lost both ends and
+   printed as "rice-performance fronti". Fit the whole image instead and let the
+   box breathe, with a neutral mat where the aspect ratios disagree. */
+.hero-image { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #f2f6f5; border-radius: 8px; border: 1px solid var(--line); }
 .hero-panel { min-height: 260px; border-radius: 8px; border: 1px solid var(--line); background: #102321; color: #f6fbf9; display: flex; flex-direction: column; justify-content: flex-end; padding: 28px; }
 .hero-panel span { font-size: 54px; font-weight: 900; line-height: 1; color: #8dd7c8; }
 .hero-panel strong { font-size: 22px; margin-top: 8px; }

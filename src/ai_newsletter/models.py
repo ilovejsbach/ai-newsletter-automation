@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 class SourceConfig(BaseModel):
     id: str
     name: str
-    kind: Literal["rss", "webpage", "github", "huggingface", "hnsearch"]
+    kind: Literal["rss", "webpage", "github", "huggingface", "hnsearch", "hfpapers"]
     url: str | None = None
     query: str | None = None
     language: str = "en"
@@ -43,11 +43,18 @@ class Article(BaseModel):
     source_weight: float = 1.0
     panel: str = "curator"
     authority_tier: float = 0.5
+    # Who published this (registrable domain) vs. which feed surfaced it. Selection
+    # caps key on the former; the latter is reporting only.
+    publisher: str = ""
+    discovery_channel: str = ""
 
 
 class RankedArticle(Article):
     score: float = 0.0
     score_breakdown: dict[str, float] = Field(default_factory=dict)
+    heat: float = 0.0
+    heat_breakdown: dict[str, float] = Field(default_factory=dict)
+    cluster_size: int = 1
     topic_key: str = ""
     category: str = ""
     section: str = ""
