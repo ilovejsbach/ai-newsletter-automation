@@ -38,6 +38,10 @@ class Article(BaseModel):
     summary: str = ""
     body: str = ""
     image_urls: list[str] = Field(default_factory=list)
+    # Data-bearing images (charts, tables, benchmark comparisons) found in the
+    # body — kept separate from image_urls so they never compete with og:image
+    # for the single representative-image slot; rendered inline instead.
+    info_image_urls: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     metrics: dict[str, int | float | str | None] = Field(default_factory=dict)
     source_weight: float = 1.0
@@ -67,9 +71,15 @@ class RankedArticle(Article):
     why_it_matters: str = ""
     terms: list[str] = Field(default_factory=list)
     detail_intro: str = ""
-    detail_sections: list[dict[str, str]] = Field(default_factory=list)
+    # 각 섹션은 최소 {"heading": str, "body": str}이고, 수치 비교가 핵심인
+    # 섹션은 선택적으로 {"table": {"columns": [...], "rows": [[...]]}}를 더
+    # 가질 수 있다 — 그래서 값 타입을 str에서 object로 넓힌다.
+    detail_sections: list[dict[str, object]] = Field(default_factory=list)
     local_image: str = ""
     image_credit: str = ""
+    # Downloaded copies of info_image_urls (assets/images/<file>), inserted
+    # inline in the detail body after the first section.
+    local_info_images: list[str] = Field(default_factory=list)
 
 
 class Issue(BaseModel):

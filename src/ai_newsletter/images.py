@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import re
 import shutil
@@ -84,9 +85,13 @@ def capture_article_images(
         url = _download_image_urls(article.image_urls, idx, article, image_dir)
         if url:
             _remember(url)
-            return
-        if chrome:
+        elif chrome:
             _screenshot_for(chrome, article.url, idx, article, image_dir)
+        # Info images (charts/tables) are independent of the representative
+        # image outcome above — download them regardless of whether the hero
+        # came from a URL or a screenshot fallback.
+        if article.info_image_urls:
+            _download_info_images(article.info_image_urls, idx, article, image_dir)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(executor.map(_own, enumerate(articles, 1)))
@@ -166,6 +171,36 @@ def _capture_with_chrome(chrome: str, url: str, target: Path, virtual_time_ms: i
     return result.returncode == 0 and target.exists() and target.stat().st_size > 2048
 
 
+def _download_image_to(image_url: str, target: Path) -> bool:
+    """Download image_url to target; True on success (usable size/type).
+
+    Shared by the representative-image download and the info-image download —
+    both need the same fetch/content-type-guard/size-guard/cleanup sequence,
+    just against different target filenames and URL lists.
+    """
+    try:
+        with httpx.Client(follow_redirects=True, timeout=20.0) as client:
+            response = client.get(image_url, headers={"User-Agent": "ai-newsletter-automation/0.1"})
+            response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if "image" not in content_type and target.suffix == ".png":
+            return False
+        target.write_bytes(response.content)
+    except Exception:
+        return False
+    # A flat brand asset compresses to almost nothing even at full width: the
+    # Google "super G" arrived as a 1300px JPEG of just 17 KB and shipped as an
+    # article image. Size, not dimensions, is what separates a real photo or
+    # diagram from a logo, so hold downloads to the same bar as screenshots.
+    if target.exists() and target.stat().st_size >= _MIN_MEANINGFUL_SHOT_BYTES:
+        return True
+    try:
+        target.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return False
+
+
 def _download_image_urls(
     image_urls: list[str], idx: int, article: RankedArticle, image_dir: Path
 ) -> str:
@@ -175,28 +210,32 @@ def _download_image_urls(
             continue
         suffix = _image_suffix(image_url)
         target = image_dir / f"article_{idx:02d}_{article.id}{suffix}"
-        try:
-            with httpx.Client(follow_redirects=True, timeout=20.0) as client:
-                response = client.get(image_url, headers={"User-Agent": "ai-newsletter-automation/0.1"})
-                response.raise_for_status()
-            content_type = response.headers.get("content-type", "")
-            if "image" not in content_type and suffix == ".png":
-                continue
-            target.write_bytes(response.content)
-        except Exception:
-            continue
-        # A flat brand asset compresses to almost nothing even at full width: the
-        # Google "super G" arrived as a 1300px JPEG of just 17 KB and shipped as an
-        # article image. Size, not dimensions, is what separates a real photo or
-        # diagram from a logo, so hold downloads to the same bar as screenshots.
-        if target.exists() and target.stat().st_size >= _MIN_MEANINGFUL_SHOT_BYTES:
+        if _download_image_to(image_url, target):
             article.local_image = f"assets/images/{target.name}"
             return image_url
-        try:
-            target.unlink(missing_ok=True)
-        except OSError:
-            pass
     return ""
+
+
+def _download_info_images(
+    urls: list[str], idx: int, article: RankedArticle, image_dir: Path
+) -> None:
+    """Download up to the top 2 info images (charts/tables) alongside the
+    representative image.
+
+    Unlike _download_image_urls, `_looks_like_content_image` is NOT applied
+    here — these URLs already passed the keyword filter in collectors.py
+    (_find_info_images), so re-applying the generic decorative-asset filter
+    would only risk dropping a legitimate chart whose filename happens to
+    contain a word like "icon".
+    """
+    saved: list[str] = []
+    for n, image_url in enumerate(urls[:2], 1):
+        suffix = _image_suffix(image_url)
+        short_hash = hashlib.sha256(image_url.encode("utf-8")).hexdigest()[:8]
+        target = image_dir / f"article_{idx:02d}_info{n}_{short_hash}{suffix}"
+        if _download_image_to(image_url, target):
+            saved.append(f"assets/images/{target.name}")
+    article.local_info_images = saved
 
 
 def _screenshot_for(

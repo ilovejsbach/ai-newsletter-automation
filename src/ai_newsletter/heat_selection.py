@@ -185,6 +185,9 @@ def _merge_pair(keep: Article, other: Article) -> Article:
     for url in secondary.image_urls:
         if url not in merged.image_urls:
             merged.image_urls.append(url)
+    for url in secondary.info_image_urls:
+        if url not in merged.info_image_urls:
+            merged.info_image_urls.append(url)
     if secondary.published_at and (
         merged.published_at is None or secondary.published_at < merged.published_at
     ):

@@ -137,8 +137,8 @@ class Collector:
                 or _xml_text(entry, "content")
             )
             image_urls = _extract_images_from_xml(entry)
-            body, detail_images, _ = (
-                self.fetch_article_detail(link) if title and link else ("", [], None)
+            body, detail_images, info_images, _ = (
+                self.fetch_article_detail(link) if title and link else ("", [], [], None)
             )
             if title and link:
                 articles.append(
@@ -152,6 +152,7 @@ class Collector:
                         summary=summary[:1200],
                         body=body,
                         image_urls=list(dict.fromkeys(image_urls + detail_images))[:3],
+                        info_image_urls=info_images[:3],
                         source_weight=source.weight,
                         panel=source.panel,
                         authority_tier=source.authority_tier,
@@ -170,17 +171,18 @@ class Collector:
         for link in soup.select("a[href]"):
             if len(articles) >= self.options.per_source_limit:
                 break
-            title = " ".join(link.get_text(" ", strip=True).split())
-            title = _clean_title(title)
+            raw_text = " ".join(link.get_text(" ", strip=True).split())
+            title = _clean_title(raw_text)
             href = urljoin(source.url, link["href"])
             if len(title) < 12 or not href.startswith("http"):
                 continue
             if not _looks_ai_related(title):
                 continue
-            body, image_urls, meta_published = self.fetch_article_detail(href)
+            body, image_urls, info_images, meta_published = self.fetch_article_detail(href)
             # What the article says about itself beats anything guessed from the
             # listing page around it.
-            published = meta_published or parse_date_from_text(title)
+            # Parse from the raw anchor text: _clean_title strips trailing dates.
+            published = meta_published or parse_date_from_text(raw_text)
             if published is None:
                 nearby = link.find_parent(["article", "li", "div"])
                 if nearby is not None:
@@ -201,6 +203,7 @@ class Collector:
                     published_at=published,
                     body=body,
                     image_urls=image_urls[:3],
+                    info_image_urls=info_images[:3],
                     source_weight=source.weight,
                     panel=source.panel,
                     authority_tier=source.authority_tier,
@@ -405,7 +408,7 @@ class Collector:
                 datetime.now(timezone.utc) - timedelta(days=days)
             ):
                 continue
-            body, images, _ = self.fetch_article_detail(link)
+            body, images, info_images, _ = self.fetch_article_detail(link)
             articles.append(
                 Article(
                     id=stable_id(link),
@@ -417,6 +420,7 @@ class Collector:
                     summary=(strip_html(body)[:600] if body else title),
                     body=body,
                     image_urls=images[:3],
+                    info_image_urls=info_images[:3],
                     metrics={
                         "hn_points": int(hit.get("points") or 0),
                         "hn_comments": int(hit.get("num_comments") or 0),
@@ -428,12 +432,12 @@ class Collector:
             )
         return articles
 
-    def fetch_article_detail(self, url: str) -> tuple[str, list[str], datetime | None]:
+    def fetch_article_detail(self, url: str) -> tuple[str, list[str], list[str], datetime | None]:
         try:
             resp = self.client.get(url)
             resp.raise_for_status()
         except Exception:
-            return "", [], None
+            return "", [], [], None
         soup = BeautifulSoup(resp.text, "html.parser")
         # Read the date before the <script> tags are stripped — JSON-LD lives there,
         # and it is the only place most blogs state the date unambiguously. Scanning
@@ -457,13 +461,182 @@ class Collector:
                     continue
                 paragraphs.append(text)
         body = "\n".join(dict.fromkeys([title, description, *paragraphs]))
-        images = [image] if image else []
+        # Benchmark tables carry the numbers a "vs. previous model" article is
+        # actually about (x.ai's Grok launch posts, model system cards, ...), but
+        # they usually sit well past the 12k-char body cap. Append them separately
+        # so they survive the cap instead of being lost to whatever came first.
+        body = body[:12000]
+        tables = _extract_tables(soup)
+        if tables:
+            body += "\n\n[표]\n" + "\n\n[표]\n".join(tables)
+        body_imgs: list = []
         if main:
             for img in main.select("img[src]"):
-                src = urljoin(url, img.get("src", ""))
-                if src.startswith("http"):
-                    images.append(src)
-        return body[:12000], list(dict.fromkeys(images)), published
+                resolved = urljoin(url, img.get("src", ""))
+                if resolved.startswith("http"):
+                    # Mutated in place so _find_info_images can read a resolved URL
+                    # back off the tag alongside its alt/width — passing the tag
+                    # itself (not a bare string) is what lets it match on alt text.
+                    img["src"] = resolved
+                    body_imgs.append(img)
+        # 대표 이미지는 og:image 우선(소셜 카드용으로 고른 브랜드 히어로가 보기
+        # 좋다), 그다음 본문 이미지를 등장 순서 그대로 — 점수로 재정렬하면 기자
+        # 프로필 사진 같은 본문 첫 이미지가 히어로를 밀어내는 부작용이 생긴다
+        # (MarkTechPost 기사에서 실제로 발생). 정보성 이미지(차트/표)는 대표
+        # 이미지 자리를 놓고 경쟁시키지 않고 info_image_urls로 별도 수집한다.
+        ordered_images = ([image] if image else []) + [
+            img.get("src", "") for img in body_imgs if img.get("src")
+        ]
+        images = list(dict.fromkeys(ordered_images))
+        info_images = _find_info_images(body_imgs)
+        return body, images, info_images, published
+
+
+# Words that mark an image as data-bearing rather than decorative — a chart,
+# table screenshot, or benchmark comparison, as opposed to a hero photo or logo.
+_BENCH_IMAGE_RE = re.compile(
+    r"bench|chart|table|graph|compar|score|eval|result|metric", re.I
+)
+
+
+def _extract_tables(soup: BeautifulSoup) -> list[str]:
+    """Serialize benchmark tables so their numbers survive the body-length cap.
+
+    Real <table> markup is tried first; the Tailwind `tabular-nums` div-grid
+    fallback only runs when no <table> was found, since a page that has both
+    would otherwise duplicate the same numbers twice.
+    """
+    tables = _extract_html_tables(soup)
+    if tables:
+        return tables
+    return _extract_grid_tables(soup)
+
+
+def _extract_html_tables(soup: BeautifulSoup) -> list[str]:
+    serialized: list[str] = []
+    for table in soup.find_all("table"):
+        if len(serialized) >= 3:
+            break
+        rows: list[str] = []
+        caption = table.find("caption")
+        if caption:
+            caption_text = " ".join(caption.get_text(" ", strip=True).split())
+            if caption_text:
+                rows.append(caption_text)
+        for tr in table.find_all("tr"):
+            cells = [
+                " ".join(cell.get_text(" ", strip=True).split())
+                for cell in tr.find_all(["th", "td"])
+            ]
+            cells = [cell for cell in cells if cell]
+            if cells:
+                rows.append(" | ".join(cells))
+        text = "\n".join(rows).strip()
+        if text:
+            serialized.append(text[:1200])
+    return serialized
+
+
+# Below this density (chars of visible text per tabular-nums cell), a container
+# is a genuine data grid — mostly short labels and numbers. Above it, the
+# container is something wide like the whole article body that merely happens
+# to contain 8+ numeric cells somewhere inside it.
+_GRID_DENSITY_THRESHOLD = 80
+
+
+def _extract_grid_tables(soup: BeautifulSoup) -> list[str]:
+    """Fallback for benchmark tables built as Tailwind `tabular-nums` div grids
+    instead of <table> markup (verified against x.ai's Grok launch posts).
+
+    Walk up from every `tabular-nums` cell to the innermost ancestor that holds
+    8+ such cells (a plausible table), then keep only ancestors whose text
+    density says they are actually a compact grid and not, say, the whole
+    article wrapped around a couple of numbers.
+    """
+    cells = soup.select('[class*="tabular-nums"]')
+    if len(cells) < 8:
+        return []
+    candidates: dict[int, object] = {}
+    for cell in cells:
+        node = cell
+        best = None
+        while node is not None and getattr(node, "name", None):
+            if len(node.select('[class*="tabular-nums"]')) >= 8:
+                best = node
+                break
+            node = node.parent
+        if best is not None:
+            candidates[id(best)] = best
+    accepted = []
+    for node in candidates.values():
+        cell_count = len(node.select('[class*="tabular-nums"]'))
+        density = len(node.get_text(" | ", strip=True)) / cell_count
+        if density < _GRID_DENSITY_THRESHOLD:
+            accepted.append(node)
+    # Drop any accepted ancestor that is itself nested inside another accepted
+    # ancestor — otherwise the same grid is emitted once per nesting level.
+    filtered = []
+    for node in accepted:
+        ancestor_ids = {id(parent) for parent in node.parents}
+        if any(id(other) in ancestor_ids for other in accepted if other is not node):
+            continue
+        filtered.append(node)
+    serialized: list[str] = []
+    for node in filtered:
+        if len(serialized) >= 2:
+            break
+        text = node.get_text(" | ", strip=True)
+        if text:
+            serialized.append(text[:1500])
+    return serialized
+
+
+# Filenames/alt text that mark an image as decorative rather than data-bearing —
+# a byline photo, a site logo, a status badge — even when it also happens to
+# match _BENCH_IMAGE_RE (e.g. "compare" in a favicon's marketing alt text).
+_DECORATIVE_IMAGE_RE = re.compile(
+    r"avatar|author|profile|headshot|logo|icon|badge|favicon|banner", re.I
+)
+
+
+def _has_small_dimension(img) -> bool:
+    """True if a declared width/height/data-origin-width says this is an icon
+    (< 300px). Missing attributes are not evidence either way, so they pass."""
+    for attr in ("width", "height", "data-origin-width"):
+        value = img.get(attr)
+        if not value:
+            continue
+        digits = re.sub(r"[^\d]", "", str(value))
+        if digits and int(digits) < 300:
+            return True
+    return False
+
+
+def _find_info_images(body_img_tags: list) -> list[str]:
+    """Collect information-bearing body images (charts, tables, benchmark
+    comparisons) separately from the representative (og:image) hero.
+
+    These used to compete with og:image for the single "representative image"
+    slot, which let a reporter's profile photo (matched as a body <img>) beat
+    a brand hero (see collectors.py history / MarkTechPost regression). Instead
+    they are collected here and rendered inline in the article body, so a good
+    hero and a useful chart can both survive.
+    """
+    results: list[str] = []
+    for img in body_img_tags:
+        src = img.get("src", "")
+        if not src:
+            continue
+        alt = img.get("alt") or ""
+        haystack = f"{src} {alt}"
+        if not _BENCH_IMAGE_RE.search(haystack):
+            continue
+        if _DECORATIVE_IMAGE_RE.search(haystack):
+            continue
+        if _has_small_dimension(img):
+            continue
+        results.append(src)
+    return list(dict.fromkeys(results))[:3]
 
 
 def _published_from_metadata(soup: BeautifulSoup) -> datetime | None:
@@ -514,9 +687,21 @@ def _xml_text(entry: ET.Element, tag: str) -> str:
     return found.text if found is not None and found.text else ""
 
 
+# Listing-page anchor text often glues the article title to its metadata line,
+# e.g. "… to put it to work Aug 11th 2026 9:00am, by Frederic Lardinois".
+_TRAILING_BYLINE_RE = re.compile(r",\s*by\s+[A-Z][\w'.-]*(?:\s+[A-Z][\w'.-]*){0,3}$")
+_TRAILING_DATE_RE = re.compile(
+    r"\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+    r"\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}"
+    r"(?:\s+\d{1,2}:\d{2}\s*[AaPp][Mm])?$"
+)
+
+
 def _clean_title(title: str) -> str:
     title = re.sub(r"\s+", " ", title).strip()
     title = re.sub(r"^(Product|Research|Company|Policy)\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}\s+", "", title)
+    title = _TRAILING_BYLINE_RE.sub("", title)
+    title = _TRAILING_DATE_RE.sub("", title).rstrip()
     if len(title) > 180:
         return f"{title[:177].rstrip()}..."
     return title

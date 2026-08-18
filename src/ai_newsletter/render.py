@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import shutil
 import base64
 import subprocess
 import csv
 import re
+import zipfile
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -187,19 +189,48 @@ def write_publish_ready_package(package: NewsletterPackage) -> None:
     (publish_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     (package_dir / "README_UIPATH.md").write_text(render_publish_readme(date_key), encoding="utf-8")
 
+    # 배포 zip은 실제 게시에 필요한 12개 파일만 평평하게 담는다: 이미지 11장 +
+    # 게시 HTML 1개 (이미지 경로는 같은 폴더 기준이라 아무 데나 풀어도 열린다).
+    # UiPath 계약용 전체 구조(transfer_package/)는 폴더 형태로 그대로 유지된다.
+    # 이미지는 2배율 캡처본을 256색으로 감량해 담는다 — 망내 품질 비교(2026-08)
+    # 결과 채택안: 2배율 선명도를 유지하면서 기존 1배율 배포와 비슷한 크기가 된다.
     zip_path = publish_root / f"ai_weekly_{date_key}_publish_package.zip"
     zip_path.unlink(missing_ok=True)
-    shutil.make_archive(str(zip_path.with_suffix("")), "zip", root_dir=publish_root, base_dir="transfer_package")
+    flat_html = render_publish_board_html(
+        slots, use_placeholders=False, title=package.title, image_prefix=""
+    )
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        zf.writestr("board_post.html", flat_html)
+        for _, filename, _ in slots:
+            image_file = images_dir / filename
+            if image_file.exists():
+                zf.writestr(filename, _optimize_publish_png(image_file.read_bytes()))
 
 
 def _placeholder(slot: str) -> str:
     return "{{IMG_" + slot + "_URL}}"
 
 
+def _optimize_publish_png(data: bytes) -> bytes:
+    """게시용 PNG를 256색 팔레트로 감량한다 (흰 배경 카드 디자인에서는 육안
+    차이가 사실상 없고 크기가 ~1/3). 감량본이 더 커지면 원본을 그대로 쓴다."""
+    import io
+
+    from PIL import Image
+
+    image = Image.open(io.BytesIO(data)).convert("RGB")
+    quantized = image.quantize(colors=256, method=Image.MEDIANCUT, dither=Image.NONE)
+    buffer = io.BytesIO()
+    quantized.save(buffer, format="PNG", optimize=True)
+    optimized = buffer.getvalue()
+    return optimized if len(optimized) < len(data) else data
+
+
 def render_publish_board_html(
     slots: list[tuple[str, str, str]],
     use_placeholders: bool,
     title: str = "AI 주간 뉴스레터",
+    image_prefix: str = "../images/",
 ) -> str:
     n = len(slots)
     checked_tab_css = "\n  ".join(
@@ -221,8 +252,14 @@ def render_publish_board_html(
     )
     slide_imgs = []
     for slot, filename, slot_title in slots:
-        src = _placeholder(slot) if use_placeholders else f"../images/{filename}"
-        slide_imgs.append(f'<img src="{escape(src)}" alt="{escape(slot_title)}">')
+        src = _placeholder(slot) if use_placeholders else f"{image_prefix}{filename}"
+        # 원본 PNG는 960px 표시 기준의 2배율(1920px)이다. width 속성 + 인라인
+        # 스타일은 나모웹에디터가 <style>을 제거해도 표시 폭 960px가 유지되게
+        # 하는 이중 방어 — 확대가 안 일어나야 고DPI/넓은 게시판에서도 선명하다.
+        slide_imgs.append(
+            f'<img src="{escape(src)}" alt="{escape(slot_title)}" width="960" '
+            f'style="width:100%;max-width:960px;height:auto">'
+        )
     page_spans = "\n    ".join(
         f"<span>{escape(label)} / {n}</span>" for label in labels
     )
@@ -431,7 +468,13 @@ def capture_html_as_png(html_path: Path, output_path: Path) -> tuple[bool, str]:
                     "브라우저 없음 — Chrome 또는 Edge를 설치하거나 "
                     "`uv run playwright install chromium`을 실행하세요. " + " / ".join(errors)
                 )
-            page = browser.new_page(viewport={"width": 960, "height": 1400})
+            # 2배율(레티나) 캡처: 게시판이 이미지를 확대/축소해도 텍스트가 선명하게
+            # 남도록 1920px 폭으로 찍고, 게시 HTML에서 960px로 표시한다.
+            # CAPTURE_SCALE로 조절 가능 (품질/용량 비교 실험용: 1.5, 2 등).
+            scale = float(os.getenv("CAPTURE_SCALE", "2"))
+            page = browser.new_page(
+                viewport={"width": 960, "height": 1400}, device_scale_factor=scale
+            )
             # 배포물이 PNG이므로 폰트(CDN)·이미지가 다 로드된 뒤 캡처한다:
             # networkidle = 네트워크 요청이 잠잠해질 때까지 대기 (고정 대기보다 확실)
             try:
@@ -455,6 +498,7 @@ def _capture_with_npx(html_path: Path, output_path: Path) -> tuple[bool, str]:
                 "screenshot",
                 "--full-page",
                 "--viewport-size=960,1400",
+                f"--device-scale-factor={os.getenv('CAPTURE_SCALE', '2')}",
                 "--wait-for-timeout=1500",
                 html_path.resolve().as_uri(),
                 str(output_path.resolve()),
@@ -489,7 +533,7 @@ def render_board_image_post(
     for idx, row in enumerate(image_rows, 1):
         src = escape(str(row["file"]))
         label = escape(str(row["label"]))
-        image = f'<img src="{src}" alt="{label}" style="display:block;width:100%;max-width:960px;height:auto;border:1px solid #ddd;margin:0 auto;">'
+        image = f'<img src="{src}" alt="{label}" width="960" style="display:block;width:960px;max-width:100%;height:auto;border:1px solid #ddd;margin:0 auto;">'
         if with_link_placeholders and idx > 1:
             image = f'<a href="INTERNAL_ARTICLE_URL_{idx - 1:02d}" style="display:block;text-decoration:none;">{image}</a>'
         lines.append(
@@ -524,7 +568,7 @@ def render_board_image_indexed_post(
             f"""
 <div id="article-{idx:02d}" style="margin:32px 0 0;padding-top:10px;border-top:1px solid #ddd;">
   <p style="margin:0 0 8px;color:#666;font-size:13px;">Article {idx:02d}. {label}</p>
-  <img src="{src}" alt="{label}" style="display:block;width:100%;max-width:960px;height:auto;border:1px solid #ddd;margin:0 auto;">
+  <img src="{src}" alt="{label}" width="960" style="display:block;width:960px;max-width:100%;height:auto;border:1px solid #ddd;margin:0 auto;">
   <p style="margin:10px 0 0;text-align:right;"><a href="#top" style="color:#0f766e;text-decoration:none;font-size:13px;">맨 위로</a></p>
 </div>
 """
@@ -536,7 +580,7 @@ def render_board_image_indexed_post(
     <strong style="display:block;margin-bottom:8px;">상세 아티클 바로가기</strong>
     {nav}
   </div>
-  <img src="{escape(str(summary["file"]))}" alt="{escape(str(summary["label"]))}" style="display:block;width:100%;max-width:960px;height:auto;border:1px solid #ddd;margin:0 auto 28px;">
+  <img src="{escape(str(summary["file"]))}" alt="{escape(str(summary["label"]))}" width="960" style="display:block;width:960px;max-width:100%;height:auto;border:1px solid #ddd;margin:0 auto 28px;">
   {"".join(sections)}
 </div>
 """
@@ -559,7 +603,7 @@ def render_board_image_details_post(
 <details style="margin:10px 0;border:1px solid #d8dee8;background:#fff;">
   <summary style="cursor:pointer;padding:12px 14px;font-weight:bold;color:#111;">{idx:02d}. {label}</summary>
   <div style="padding:0 14px 14px;">
-    <img src="{src}" alt="{label}" style="display:block;width:100%;max-width:960px;height:auto;border:1px solid #ddd;margin:0 auto;">
+    <img src="{src}" alt="{label}" width="960" style="display:block;width:960px;max-width:100%;height:auto;border:1px solid #ddd;margin:0 auto;">
   </div>
 </details>
 """
@@ -567,7 +611,7 @@ def render_board_image_details_post(
     return f"""
 <div style="max-width:980px;margin:0 auto;font-family:Arial,'Noto Sans KR',sans-serif;color:#222;line-height:1.6;">
   <h1 style="font-size:26px;line-height:1.35;margin:0 0 14px;">{escape(package.title)}</h1>
-  <img src="{escape(str(summary["file"]))}" alt="{escape(str(summary["label"]))}" style="display:block;width:100%;max-width:960px;height:auto;border:1px solid #ddd;margin:0 auto 24px;">
+  <img src="{escape(str(summary["file"]))}" alt="{escape(str(summary["label"]))}" width="960" style="display:block;width:960px;max-width:100%;height:auto;border:1px solid #ddd;margin:0 auto 24px;">
   <h2 style="font-size:20px;margin:22px 0 12px;">상세 아티클</h2>
   {"".join(details)}
 </div>
@@ -857,13 +901,18 @@ def _namo_article_html(
         else ""
     )
     sections = article.detail_sections or _fallback_detail_sections(article)
-    section_html = "".join(
+    section_blocks = [
         f"""
 <h4 style="font-size:18px;margin:22px 0 8px;color:#111;">{escape(section.get("heading", ""))}</h4>
 {namo_paragraphs(section.get("body", ""))}
+{_render_data_table_inline(section.get("table"))}
 """
         for section in sections
+    ]
+    section_blocks = _insert_after_first_section(
+        section_blocks, _namo_info_image_html(package, article, image_mode)
     )
+    section_html = "".join(section_blocks)
     terms = ", ".join(str(term) for term in article.terms[:8])
     return f"""
 <div style="border-top:1px solid #ddd;padding:28px 0;">
@@ -878,28 +927,61 @@ def _namo_article_html(
 """
 
 
+def _namo_info_image_html(
+    package: NewsletterPackage, article: RankedArticle, image_mode: str
+) -> str:
+    """나모 인라인 렌더러용 정보성 이미지 블록 (인라인 스타일, 게시판 붙여넣기용)."""
+    srcs = _board_info_image_srcs(package, article, image_mode)
+    if not srcs:
+        return ""
+    blocks = []
+    for src in srcs:
+        blocks.append(
+            f'<figure style="margin:18px 0"><img src="{escape(src)}" alt="원문 자료 이미지" '
+            f'style="display:block;width:100%;max-width:760px;height:auto;border:1px solid #ddd;">'
+            f'<figcaption style="font-size:12px;color:#888;margin-top:6px">'
+            f'원문 자료 (기사 원문에서 발췌)</figcaption></figure>'
+        )
+    return "".join(blocks)
+
+
 def namo_paragraphs(text: str) -> str:
-    chunks = [chunk.strip() for chunk in text.split("\n") if chunk.strip()]
+    """paragraphs()와 같은 빈 줄 기준 문단 묶기 — 인라인 스타일 버전.
+
+    나모(게시판 붙여넣기용) 렌더러는 외부 스타일시트를 쓰지 않으므로 <p>/<ul>에
+    직접 style을 준다는 점만 다르고, 문단·불릿 분리 로직은 paragraphs()와 동일하게
+    맞춘다 — 안 그러면 상세/게시판 렌더러는 문단으로 읽히는데 나모만 문장마다
+    줄바뀐 옛 모양으로 남는다.
+    """
+    blocks = [block.strip() for block in _PARAGRAPH_BLOCK_RE.split(text) if block.strip()]
     html: list[str] = []
-    list_items: list[str] = []
-    for chunk in chunks:
-        if chunk.startswith("- "):
-            list_items.append(chunk[2:].strip())
-            continue
+    for block in blocks:
+        lines = [line.strip() for line in block.split("\n") if line.strip()]
+        sentence_buf: list[str] = []
+        list_items: list[str] = []
+        for line in lines:
+            if line.startswith("- "):
+                if sentence_buf:
+                    html.append(f'<p style="margin:0 0 12px;color:#333;">{escape(" ".join(sentence_buf))}</p>')
+                    sentence_buf = []
+                list_items.append(line[2:].strip())
+                continue
+            if list_items:
+                html.append(
+                    '<ul style="margin:6px 0 12px 22px;padding:0;">'
+                    + "".join(f'<li style="margin:5px 0;">{escape(item)}</li>' for item in list_items)
+                    + "</ul>"
+                )
+                list_items = []
+            sentence_buf.append(line)
         if list_items:
             html.append(
                 '<ul style="margin:6px 0 12px 22px;padding:0;">'
                 + "".join(f'<li style="margin:5px 0;">{escape(item)}</li>' for item in list_items)
                 + "</ul>"
             )
-            list_items = []
-        html.append(f'<p style="margin:0 0 12px;color:#333;">{escape(chunk)}</p>')
-    if list_items:
-        html.append(
-            '<ul style="margin:6px 0 12px 22px;padding:0;">'
-            + "".join(f'<li style="margin:5px 0;">{escape(item)}</li>' for item in list_items)
-            + "</ul>"
-        )
+        if sentence_buf:
+            html.append(f'<p style="margin:0 0 12px;color:#333;">{escape(" ".join(sentence_buf))}</p>')
     return "\n".join(html)
 
 
@@ -927,10 +1009,15 @@ def _board_article_html(
     image = _board_image_src(package, article, image_mode)
     image_html = f'<p><img class="board-image" src="{escape(image)}" alt="대표 이미지"></p>' if image else ""
     sections = article.detail_sections or _fallback_detail_sections(article)
-    section_html = "".join(
+    section_blocks = [
         f"<h4>{escape(section.get('heading', ''))}</h4>{paragraphs(section.get('body', ''))}"
+        f"{_render_data_table(section.get('table'))}"
         for section in sections
+    ]
+    section_blocks = _insert_after_first_section(
+        section_blocks, _board_info_image_html(package, article, image_mode)
     )
+    section_html = "".join(section_blocks)
     terms = ", ".join(str(term) for term in article.terms[:8])
     return f"""
 <article class="board-article" id="article-{idx:02d}">
@@ -943,6 +1030,25 @@ def _board_article_html(
   <p class="board-url"><strong>출처:</strong> {escape(article.url)}</p>
 </article>
 """
+
+
+def _board_info_image_html(
+    package: NewsletterPackage, article: RankedArticle, image_mode: str
+) -> str:
+    """게시판 본문 렌더러용 정보성 이미지 블록. board-image 클래스를 재사용해
+    대표 이미지와 같은 크기 규칙을 따르게 한다."""
+    srcs = _board_info_image_srcs(package, article, image_mode)
+    if not srcs:
+        return ""
+    blocks = []
+    for src in srcs:
+        blocks.append(
+            f'<figure class="board-image-wrap info-image" style="margin:18px 0">'
+            f'<img class="board-image" src="{escape(src)}" alt="원문 자료 이미지">'
+            f'<figcaption style="font-size:12px;color:#888;margin-top:6px">'
+            f'원문 자료 (기사 원문에서 발췌)</figcaption></figure>'
+        )
+    return "".join(blocks)
 
 
 def render_board_body(package: NewsletterPackage, image_mode: str, simple: bool = False) -> str:
@@ -1012,10 +1118,9 @@ def render_board_body(package: NewsletterPackage, image_mode: str, simple: bool 
 """
 
 
-def _board_image_src(package: NewsletterPackage, article: RankedArticle, image_mode: str) -> str:
-    if image_mode == "none":
-        return ""
-    src = article.local_image or _first_image([article])
+def _resolve_board_src(package: NewsletterPackage, src: str, image_mode: str) -> str:
+    """image_mode(file/base64/inline)에 맞게 로컬 상대경로를 실제 참조 가능한
+    src로 바꾼다. 대표 이미지와 정보성 이미지가 같은 규칙을 쓰므로 공유한다."""
     if not src:
         return ""
     if image_mode == "file":
@@ -1028,6 +1133,25 @@ def _board_image_src(package: NewsletterPackage, article: RankedArticle, image_m
         encoded = base64.b64encode(local.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{encoded}"
     return src
+
+
+def _board_image_src(package: NewsletterPackage, article: RankedArticle, image_mode: str) -> str:
+    if image_mode == "none":
+        return ""
+    src = article.local_image or _first_image([article])
+    return _resolve_board_src(package, src, image_mode)
+
+
+def _board_info_image_srcs(
+    package: NewsletterPackage, article: RankedArticle, image_mode: str
+) -> list[str]:
+    if image_mode == "none":
+        return []
+    return [
+        resolved
+        for path in article.local_info_images
+        if (resolved := _resolve_board_src(package, path, image_mode))
+    ]
 
 
 def render_board_css() -> str:
@@ -1053,6 +1177,9 @@ def render_board_css() -> str:
 .board-article p { margin: 0 0 12px; }
 .board-article ul { margin: 6px 0 12px 20px; padding: 0; }
 .board-terms, .board-url { color: #697386; font-size: 14px; overflow-wrap: anywhere; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; margin: 10px 0 12px; }
+.data-table th, .data-table td { border: 1px solid #d8dee8; padding: 8px; text-align: left; vertical-align: top; }
+.data-table thead th { background: #f0f5f4; color: #1f2933; font-weight: 700; }
 """
 
 
@@ -1066,6 +1193,9 @@ def render_simple_board_css() -> str:
 .board-issue, .board-article { border-bottom: 1px solid #ddd; padding: 16px 0; }
 .board-article h3, .board-issue h3 { font-size: 20px; margin: 0 0 10px; }
 .board-article h4 { font-size: 17px; margin: 18px 0 8px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; margin: 10px 0 12px; }
+.data-table th, .data-table td { border: 1px solid #ccc; padding: 8px; text-align: left; vertical-align: top; }
+.data-table thead th { background: #eee; font-weight: 700; }
 """
 
 
@@ -1507,13 +1637,19 @@ def render_article_html(package: NewsletterPackage, index: int, article: RankedA
     detail_sections = article.detail_sections or _fallback_detail_sections(article)
     published = _published_date(article)
     published_row = f'<p class="url">게시일: {escape(published)}</p>' if published else ""
-    section_html = "\n".join(
+    section_blocks = [
         f"""<section>
         <h2>{escape(section.get("heading", ""))}</h2>
         {paragraphs(section.get("body", ""))}
+        {_render_data_table(section.get("table"))}
       </section>"""
         for section in detail_sections
-    )
+    ]
+    # 정보성 이미지(차트/표)는 첫 섹션 바로 뒤에 삽입 — 대표 이미지 자리를
+    # 놓고 og:image 히어로와 경쟁시키지 않고, 본문을 읽다가 바로 그림을 보게
+    # 한다.
+    section_blocks = _insert_after_first_section(section_blocks, _detail_info_image_html(article))
+    section_html = "\n".join(section_blocks)
     return f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -1570,22 +1706,41 @@ def _article_filename_by_id(articles: list[RankedArticle], article_id: str) -> s
     return ""
 
 
+# 문단 경계는 빈 줄만 인정한다 — 여러 개의 연속 빈 줄도 한 번의 경계로 취급.
+_PARAGRAPH_BLOCK_RE = re.compile(r"\n\s*\n")
+
+
 def paragraphs(text: str) -> str:
-    chunks = [chunk.strip() for chunk in text.split("\n") if chunk.strip()]
-    if not chunks:
+    """텍스트를 문단 HTML로 변환한다.
+
+    문단 경계는 빈 줄(\\n\\n)만 인정한다 — 문장마다 줄바꿈되어 있던 옛 데이터도
+    한 블록 안에서는 공백으로 이어 하나의 <p>로 합쳐 뉴스처럼 읽히게 하고,
+    LLM이 실제로 빈 줄로 나눈 곳만 문단 경계로 존중한다. 한 블록 안에서
+    '- ' 불릿 줄과 일반 문장 줄이 섞여 있으면 등장 순서대로 <p>/<ul>로 나눈다.
+    """
+    blocks = [block.strip() for block in _PARAGRAPH_BLOCK_RE.split(text) if block.strip()]
+    if not blocks:
         return "<p>내용 없음</p>"
     html: list[str] = []
-    list_items: list[str] = []
-    for chunk in chunks:
-        if chunk.startswith("- "):
-            list_items.append(chunk[2:].strip())
-            continue
+    for block in blocks:
+        lines = [line.strip() for line in block.split("\n") if line.strip()]
+        sentence_buf: list[str] = []
+        list_items: list[str] = []
+        for line in lines:
+            if line.startswith("- "):
+                if sentence_buf:
+                    html.append(f"<p>{escape(' '.join(sentence_buf))}</p>")
+                    sentence_buf = []
+                list_items.append(line[2:].strip())
+                continue
+            if list_items:
+                html.append("<ul>" + "".join(f"<li>{escape(item)}</li>" for item in list_items) + "</ul>")
+                list_items = []
+            sentence_buf.append(line)
         if list_items:
             html.append("<ul>" + "".join(f"<li>{escape(item)}</li>" for item in list_items) + "</ul>")
-            list_items = []
-        html.append(f"<p>{escape(chunk)}</p>")
-    if list_items:
-        html.append("<ul>" + "".join(f"<li>{escape(item)}</li>" for item in list_items) + "</ul>")
+        if sentence_buf:
+            html.append(f"<p>{escape(' '.join(sentence_buf))}</p>")
     return "\n".join(html)
 
 
@@ -1649,6 +1804,96 @@ def _first_image(articles: list[RankedArticle]) -> str:
             if url.startswith("http"):
                 return url
     return ""
+
+
+def _valid_table(table: object) -> tuple[list[str], list[list[str]]] | None:
+    """columns/rows가 모두 채워진 표만 유효로 본다 — 그 외(빈 값, 잘못된 형태)는
+    표를 렌더링하지 않고 본문 문단만 남긴다."""
+    if not isinstance(table, dict):
+        return None
+    columns = table.get("columns")
+    rows = table.get("rows")
+    if not isinstance(columns, list) or not columns:
+        return None
+    if not isinstance(rows, list) or not rows:
+        return None
+    clean_rows = [row for row in rows if isinstance(row, list) and row]
+    if not clean_rows:
+        return None
+    return [str(c) for c in columns], [[str(cell) for cell in row] for row in clean_rows]
+
+
+def _render_data_table(table: object) -> str:
+    """외부 스타일시트(.data-table 클래스)를 쓰는 렌더러용 표 HTML — 상세
+    아티클 페이지와 게시판(class 기반) 렌더러가 공유한다."""
+    parsed = _valid_table(table)
+    if parsed is None:
+        return ""
+    columns, rows = parsed
+    thead = "".join(f"<th>{escape(col)}</th>" for col in columns)
+    tbody = "".join(
+        "<tr>" + "".join(f"<td>{escape(cell)}</td>" for cell in row) + "</tr>" for row in rows
+    )
+    return (
+        '<div class="table-scroll" style="overflow-x:auto">'
+        f"<table class=\"data-table\"><thead><tr>{thead}</tr></thead>"
+        f"<tbody>{tbody}</tbody></table></div>"
+    )
+
+
+def _render_data_table_inline(table: object) -> str:
+    """외부 스타일시트가 없는 나모 인라인 렌더러용 표 HTML — 셀마다 style을
+    직접 줘서 붙여넣은 곳에서도 모양이 유지되게 한다."""
+    parsed = _valid_table(table)
+    if parsed is None:
+        return ""
+    columns, rows = parsed
+    th_style = (
+        'style="text-align:left;padding:8px;border-bottom:2px solid #0f766e;'
+        'background:#f0f5f4;font-variant-numeric:tabular-nums;font-size:14px;"'
+    )
+    td_style = (
+        'style="text-align:left;padding:8px;border-bottom:1px solid #ddd;'
+        'font-variant-numeric:tabular-nums;font-size:14px;"'
+    )
+    thead = "".join(f"<th {th_style}>{escape(col)}</th>" for col in columns)
+    tbody = "".join(
+        "<tr>" + "".join(f"<td {td_style}>{escape(cell)}</td>" for cell in row) + "</tr>"
+        for row in rows
+    )
+    return (
+        '<div style="overflow-x:auto;margin:12px 0">'
+        f'<table style="width:100%;border-collapse:collapse;">'
+        f"<thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table></div>"
+    )
+
+
+def _insert_after_first_section(blocks: list[str], extra: str) -> list[str]:
+    """extra를 첫 번째 섹션 뒤(두 번째 위치)에 끼워 넣는다. 섹션이 없으면 그냥
+    유일한 블록이 된다. extra가 빈 문자열이면(정보성 이미지 없음) 아무 변화
+    없이 원래 목록을 돌려준다."""
+    if not extra:
+        return blocks
+    pos = min(1, len(blocks))
+    return blocks[:pos] + [extra] + blocks[pos:]
+
+
+def _detail_info_image_html(article: RankedArticle) -> str:
+    """상세 아티클 페이지용 정보성 이미지(차트/표) 블록. 대표 이미지와 달리
+    본문 안에서만 보여주면 되므로 og:image와 경쟁하지 않는다."""
+    if not article.local_info_images:
+        return ""
+    blocks = []
+    for path in article.local_info_images:
+        src = f"../{path}"
+        blocks.append(
+            f'<figure class="detail-image-wrap info-image" style="margin:18px 0">'
+            f'<img class="detail-image" src="{escape(src)}" alt="원문 자료 이미지">'
+            f'<figcaption style="font-size:12px;color:#888;margin-top:6px">'
+            f'원문 자료 (기사 원문에서 발췌)</figcaption>'
+            f'</figure>'
+        )
+    return "\n".join(blocks)
 
 
 def _image_src(article: RankedArticle, detail: bool = False) -> str:
@@ -1745,6 +1990,14 @@ h1 { margin: 0; font-size: 34px; line-height: 1.25; letter-spacing: 0; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; }
 th { width: 140px; color: var(--muted); font-weight: 700; }
+/* 수치 비교가 핵심인 섹션의 본문 표 (LLM detail_sections[].table) — 원문 발췌의
+   벤치마크/스펙 표를 불릿 나열 대신 실제 표로 보여준다. 열이 여럿이라 위
+   두-컬럼용 th { width: 140px }는 무시하고(선택자 우선순위로 재정의) 전체
+   좌측 정렬로 통일 — 숫자 우측 정렬까지 챙기면 열마다 다른 자릿수 정렬 로직이
+   필요해 오히려 깨지기 쉽다. */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.data-table th, .data-table td { width: auto; border: 1px solid var(--line); padding: 8px; text-align: left; vertical-align: top; }
+.data-table thead th { background: var(--wash); color: var(--ink); font-weight: 700; }
 .detail-article ul { margin: 8px 0 0 18px; padding: 0; color: var(--ink); }
 .detail-article li { margin: 6px 0; }
 /* 시안 A 구조: 전폭 기사 행 + 4단 슬롯 그리드 (sectioned 모드 본지) */
