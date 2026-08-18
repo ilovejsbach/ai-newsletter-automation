@@ -24,6 +24,7 @@ from .ranking import build_quality_report, rank_articles
 from .render import make_output_dir, write_package
 from .heat_selection import select_heat_articles
 from .sections import select_sectioned_articles
+from .style_lint import lint_selection
 from .topic_radar import build_issue_radar
 from .usage import usage
 
@@ -370,6 +371,13 @@ def _run_build(
                     f"[yellow]근거 검증: 원문에 없는 숫자가 {len(flags)}개 섹션에서 발견 — "
                     f"generation_report.json의 grounding_flags를 검토하세요.[/yellow]"
                 )
+    style = lint_selection([a.model_dump(mode="json") for a in selected])
+    report["style_flags"] = style
+    if style["strong_count"] or style["weak_count"]:
+        console.print(
+            f"[yellow]문체 린트: 강 {style['strong_count']} / 중 {style['weak_count']}건 — "
+            f"빌드 후 'ai-newsletter humanize <폴더>'로 국소 재작성할 수 있습니다.[/yellow]"
+        )
     report["issues"] = [issue.model_dump(mode="json") for issue in issues]
     if use_llm:
         report = evaluate_with_openai(selected, report)
@@ -737,6 +745,57 @@ def capture(
             first_fail = next((r["message"] for r in rows if not r.get("created")), "")
             console.print(f"[yellow]실패 사유: {first_fail}[/yellow]")
     console.print(f"[bold green]Captured[/bold green] {output_dir.with_suffix('.zip')}")
+
+
+@app.command()
+def humanize(
+    output_dir: Path = typer.Argument(
+        ..., help="기존 산출물 폴더 (예: outputs/2026-08-14_weekly_ai_newsletter_v2)"
+    ),
+    capture: bool = typer.Option(False, help="재렌더 후 PNG 캡처·게시 패키지까지 갱신."),
+) -> None:
+    """AI 문체 린터에 걸린 문장만 LLM으로 국소 재작성하고 HTML을 다시 렌더링합니다.
+
+    수집·선별·본문 재생성 없이 문체(AI 티)만 다듬습니다. 원본은
+    data/selected_articles.pre_humanize.json으로 한 번만 백업되고,
+    전후 린트 결과와 변경 내역은 data/style_report.json에 저장됩니다.
+    """
+    import json as _json
+
+    from .llm import humanize_articles_data
+
+    _enable_os_trust_store()
+    usage.reset()
+    load_environment(None)
+    data_dir = output_dir / "data"
+    sel_path = data_dir / "selected_articles.json"
+    if not sel_path.exists():
+        console.print(f"[red]data/selected_articles.json이 없습니다: {output_dir}[/red]")
+        raise typer.Exit(1)
+    rows = _json.loads(sel_path.read_text(encoding="utf-8"))
+    before = lint_selection(rows)
+    if not (before["strong_count"] or before["weak_count"]):
+        console.print("[green]문체 린트에 걸린 항목이 없습니다. 재작성할 것이 없어요.[/green]")
+        return
+    backup = data_dir / "selected_articles.pre_humanize.json"
+    if not backup.exists():
+        backup.write_text(sel_path.read_text(encoding="utf-8"), encoding="utf-8")
+    edits = humanize_articles_data(rows)
+    after = lint_selection(rows)
+    sel_path.write_text(_json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    style_report = {"before": before, "after": after, "edits": edits, "usage": usage.summary()}
+    (data_dir / "style_report.json").write_text(
+        _json.dumps(style_report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    n_changes = len(edits["changes"]) + len(edits["title_changes"])
+    console.print(
+        f"[bold green]윤문 완료[/bold green] 수정 {n_changes}건 | "
+        f"린트 강 {before['strong_count']}→{after['strong_count']}, "
+        f"중 {before['weak_count']}→{after['weak_count']} | "
+        f"LLM {edits['calls']}회 호출"
+    )
+    console.print(f"[dim]전후 비교: {data_dir / 'style_report.json'} (원본 백업: {backup.name})[/dim]")
+    rerender(output_dir=output_dir, capture=capture, theme="", assign_sections=False, thumbs=None)
 
 
 @app.command()

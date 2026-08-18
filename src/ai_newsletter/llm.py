@@ -59,6 +59,15 @@ _READER_PERSONA = (
     "  8. 숫자와 고유명사는 원문 그대로 쓰고, 원문에 없는 수치는 절대 만들지 마.\n"
     "  9. 내보내기 전에 맞춤법과 오타를 다시 확인해. 특히 기술 용어를 잘못 적지 마"
     "('주론'이 아니라 '추론', '학습'과 '추론'을 섞어 쓰지 않기).\n"
+    "  10. AI 특유의 결산·격상 공식 금지: '~로 이어진다'로 문단을 닫기, "
+    "'단순한 A가 아니라 B', '중요한 것은 ~라는 점이다', '~라는 점에서 의미가 있다', "
+    "'주목할 만하다', '시사하는 바가 크다'. 대신 실제 인과와 주체를 직접 서술해.\n"
+    "  11. 과장 수식 금지: '혁신적', '획기적', '압도적', '게임 체인저'. "
+    "형용사 대신 원문의 수치와 사실로 크기를 보여줘.\n"
+    "  12. 문두 접속사('또한', '한편', '즉', '나아가', '아울러')로 문장을 여는 것은 "
+    "한 기사에 한 번까지만. 문장 관계가 자명하면 접속사 없이 이어.\n"
+    "  13. 같은 종결어미('~했다', '~이다' 등)를 3문장 이상 연속하지 마. "
+    "문장을 합치거나 어미를 바꿔 리듬에 변화를 줘.\n"
     "친절하되 가르치려 드는 말투('쉽게 말해서', '~라고 생각하면 된다'의 반복)는 피해."
 )
 
@@ -75,6 +84,10 @@ def _structured_prompt(payload: list[dict[str, object]]) -> str:
         "분량 원칙: 상세 아티클은 길어도 좋다. 원문 발췌에 정보가 풍부하면 각 슬롯을 "
         "충분히 길게(문단 여러 개, 목록 포함) 써서 원문의 정보 밀도를 최대한 옮겨. "
         "단, 길이는 원문 정보량이 결정한다 — 원문에 없는 내용으로 분량을 늘리는 것은 금지.\n"
+        "표 원칙: 원문 발췌에 [표] 블록이 있고 수치 비교가 기사의 핵심이면, 해당 섹션 객체에 "
+        "\"table\": {\"columns\": [...], \"rows\": [[...]]} 필드를 추가해. 열 2~6개·행 3~10개, "
+        "수치는 원문 그대로, 열 이름은 한국어로 자연스럽게. 표에 넣은 수치를 본문 불릿으로 "
+        "중복 나열하지 마.\n"
         "1) '핵심 브리핑' — 사실만. 원문에서 확인되는 발표/변경/수치를 4-10문장으로 상세히. "
         "스펙·설정값·가격·제약처럼 나열이 읽기 쉬운 내용은 '- '로 시작하는 목록을 적극 활용해.\n"
         "2) 섹션 특화 소제목 — 각 기사 payload의 section 값에 맞는 소제목과 관점을 써. "
@@ -102,21 +115,27 @@ def _structured_prompt(payload: list[dict[str, object]]) -> str:
         "새 문장을 만들지 말고 본문 문장을 문자 그대로 인용해. 결론을 다 말해버리는 문장보다 "
         "뒷이야기가 궁금해지는 문장을 골라. 40-90자 권장, 목록 항목 말고 서술 문장에서), "
         "korean_title(28자 안팎 — 제목만 읽어도 '누가 무엇을 했는지' 아는 직관적인 문장. "
-        "회사명·행위를 명확히: 'Sonnet 5 공개'보다 '앤스로픽, 에이전트 특화 모델 Sonnet 5 공개'. "
-        "업계 은어·영어 약어 나열·과장 금지), "
+        "회사명·행위를 명확히 하되, 이번 호 전체의 제목이 한 가지 틀로 쏠리면 안 돼: "
+        "'회사, ~ 공개' 틀은 전체의 절반 이하로 쓰고, 나머지는 수치형('7배 빨라진 ~'), "
+        "결과형('~가 ~를 금지했다'), 변화형('~가 ~로 바뀐다') 등 다른 틀을 섞어. "
+        "끝 단어도 '공개/출시/발표'로 몰지 말고 다양하게. "
+        "'X: Y' 콜론 공식과 '~의 시대' 류 상투 제목, 업계 은어·영어 약어 나열·과장 금지), "
         "korean_summary(2-3문장 — 첫 문장이 야마: 이 사건의 핵심을 비전문가도 바로 잡게), "
         "why_it_matters(1-2문장), "
         "terms(3-6개 배열, 각 항목은 '용어(영문): 한 줄 풀이' 형식 — 이 기사를 이해하는 데 "
         "필요한 개념을 내부 학습용으로 고르되 본문에서 이미 충분히 풀린 것은 제외), "
         "detail_intro(브리핑처럼 맥락을 여는 도입부 3-5문장).\n"
-        "문장은 70자 안팎, 문단은 2-3문장 단위로 짧게. "
+        "본문은 2~4문장을 공백으로 이어 쓴 흐름 문단으로 작성해. 문장마다 줄바꿈하지 말고, "
+        "문단과 문단 사이에만 빈 줄을 넣어. 스펙·수치 나열은 문단에 섞지 말고 '- ' 불릿 "
+        "블록으로 분리해. "
         "'원문에 의하면', '기사에 따르면' 같은 출처 표지 문구는 쓰지 마. "
         "GitHub stars/forks/downloads/score 같은 정량 지표나 선별 점수는 본문에 쓰지 마. "
         "원문에 없는 사실은 만들지 마.\n"
         "반드시 {\"articles\":[{\"index\":정수, \"one_liner\":..., \"hook\":..., \"korean_title\":..., "
         "\"korean_summary\":..., \"why_it_matters\":..., \"terms\":[...], \"detail_intro\":..., "
         "\"detail_sections\":[{\"heading\":\"핵심 브리핑\",\"body\":...}, "
-        "{\"heading\":\"(섹션 특화 소제목)\",\"body\":...}, {\"heading\":\"업계의 움직임\",\"body\":...}, "
+        "{\"heading\":\"(섹션 특화 소제목)\",\"body\":...,\"table\":{\"columns\":[...],\"rows\":[[...]]}} "
+        "(table은 수치 비교가 핵심일 때만 넣는 선택 필드), {\"heading\":\"업계의 움직임\",\"body\":...}, "
         "{\"heading\":\"시사점과 체크포인트\",\"body\":...}]}]} 형태의 JSON만 반환해. "
         "모든 index를 빠짐없이 포함해.\n\n"
         f"{json.dumps(payload, ensure_ascii=False)}"
@@ -248,8 +267,8 @@ def _apply_row(article: RankedArticle, row: dict[str, object], *, structured: bo
 
 
 def _order_fixed_sections(
-    sections: list[dict[str, str]], section: str
-) -> list[dict[str, str]]:
+    sections: list[dict[str, object]], section: str
+) -> list[dict[str, object]]:
     """Keep the skeleton order for this article's section; unknown headings are
     appended at the end so an off-script LLM response degrades gracefully
     instead of losing text. The generic fallback heading is accepted in the
@@ -258,7 +277,7 @@ def _order_fixed_sections(
     expected = structured_headings(section)
     if _DEFAULT_SLOT_HEADING not in expected:
         expected = expected[:1] + [expected[1], _DEFAULT_SLOT_HEADING] + expected[2:]
-    by_heading = {s["heading"].strip(): s for s in sections}
+    by_heading = {str(s["heading"]).strip(): s for s in sections}
     ordered = [by_heading.pop(h) for h in expected if h in by_heading]
     ordered.extend(by_heading.values())
     return ordered
@@ -347,13 +366,13 @@ def _normalize_terms(value: object) -> list[str]:
     return terms
 
 
-def _normalize_sections(row: dict[str, object]) -> list[dict[str, str]]:
+def _normalize_sections(row: dict[str, object]) -> list[dict[str, object]]:
     value = row.get("detail_sections") or row.get("sections") or row.get("article_sections")
     if isinstance(value, dict):
         value = [{"heading": key, "body": body} for key, body in value.items()]
     if not isinstance(value, list):
         return []
-    sections: list[dict[str, str]] = []
+    sections: list[dict[str, object]] = []
     for item in value:
         if isinstance(item, str):
             continue
@@ -362,21 +381,49 @@ def _normalize_sections(row: dict[str, object]) -> list[dict[str, str]]:
         heading = item.get("heading") or item.get("title") or item.get("section")
         body = item.get("body") or item.get("content") or item.get("text")
         if heading and body:
-            sections.append({"heading": str(heading), "body": str(body)})
+            section: dict[str, object] = {"heading": str(heading), "body": str(body)}
+            table = _normalize_table(item.get("table"))
+            if table:
+                section["table"] = table
+            sections.append(section)
     return sections
+
+
+def _normalize_table(value: object) -> dict[str, object] | None:
+    """LLM이 만든 표 후보를 검증한다 — columns/rows 형태를 갖추지 못했거나
+    비어 있으면 표를 버리고(None) 해당 섹션은 본문(body)만으로 렌더링된다."""
+    if not isinstance(value, dict):
+        return None
+    columns = value.get("columns")
+    rows = value.get("rows")
+    if not isinstance(columns, list) or not columns:
+        return None
+    if not isinstance(rows, list) or not rows:
+        return None
+    clean_rows = [
+        [str(cell) for cell in row] for row in rows if isinstance(row, list) and row
+    ]
+    if not clean_rows:
+        return None
+    return {"columns": [str(col) for col in columns], "rows": clean_rows}
 
 
 def _clean_article_text(article: RankedArticle) -> None:
     article.korean_summary = _remove_source_markers(article.korean_summary)
     article.why_it_matters = _remove_source_markers(article.why_it_matters)
     article.detail_intro = _remove_source_markers(article.detail_intro)
-    article.detail_sections = [
-        {
-            "heading": _remove_source_markers(section.get("heading", "")),
-            "body": _remove_source_markers(section.get("body", "")),
+    cleaned_sections: list[dict[str, object]] = []
+    for section in article.detail_sections:
+        cleaned: dict[str, object] = {
+            "heading": _remove_source_markers(str(section.get("heading", ""))),
+            "body": _remove_source_markers(str(section.get("body", ""))),
         }
-        for section in article.detail_sections
-    ]
+        # table은 텍스트 필드가 아니라 그대로 보존 — 출처 표지 문구 제거는
+        # 서술형 본문에만 해당한다.
+        if isinstance(section.get("table"), dict):
+            cleaned["table"] = section["table"]
+        cleaned_sections.append(cleaned)
+    article.detail_sections = cleaned_sections
 
 
 def _remove_source_markers(text: str) -> str:
@@ -404,9 +451,15 @@ def grounding_flags(articles: list[RankedArticle]) -> list[dict[str, object]]:
     for idx, article in enumerate(articles, 1):
         source = _normalized_digits(f"{article.title} {article.summary} {article.body}")
         for section in article.detail_sections:
+            # 표로 들어간 조작 수치도 같은 검사 대상이어야 한다 — 불릿에서
+            # 표로 옮겼다고 근거 검증을 피해가면 안 된다.
+            text = str(section.get("body", ""))
+            table = section.get("table")
+            if isinstance(table, dict):
+                text = f"{text} {_table_cell_text(table)}"
             missing = [
                 number
-                for number in _significant_numbers(section.get("body", ""))
+                for number in _significant_numbers(text)
                 if number not in source
             ]
             if missing:
@@ -419,6 +472,20 @@ def grounding_flags(articles: list[RankedArticle]) -> list[dict[str, object]]:
                     }
                 )
     return flags
+
+
+def _table_cell_text(table: dict[str, object]) -> str:
+    """표의 columns/rows 셀 텍스트를 한 문자열로 모은다 (근거 검증용)."""
+    parts: list[str] = []
+    columns = table.get("columns")
+    if isinstance(columns, list):
+        parts.extend(str(col) for col in columns)
+    rows = table.get("rows")
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, list):
+                parts.extend(str(cell) for cell in row)
+    return " ".join(parts)
 
 
 def _normalized_digits(text: str) -> str:
@@ -505,3 +572,143 @@ def evaluate_with_openai(articles: list[RankedArticle], report: dict[str, object
     except Exception as exc:
         report["llm_evaluation"] = f"평가 호출 실패(빌드는 계속): {exc}"
     return report
+
+
+# ---------------------------------------------------------------------------
+# Humanize pass: 린터에 걸린 필드만 의미 보존 조건으로 국소 재작성한다.
+# 전체 재생성이 아니라 플래그된 텍스트만 다듬으므로 토큰 비용이 작고,
+# 이미 저장된 산출물(data/selected_articles.json)에 사후 적용할 수 있다.
+
+_HUMANIZE_RULES = (
+    "규칙 — 반드시 지켜:\n"
+    "1) 사실·수치·고유명사·날짜·인용을 바꾸거나 새로 만들지 마.\n"
+    "2) 문장 수는 ±1, 전체 길이는 ±20% 안에서 유지해.\n"
+    "3) problems에 지적된 표현과 어미 리듬만 고치고 나머지 문장은 그대로 둬.\n"
+    "4) 새 감탄·반문·비유를 만들지 말고, 뜻이 같은 자연스러운 한국어로만 바꿔.\n"
+    "5) 같은 종결어미가 3문장 이상 이어지지 않게 문장을 합치거나 어미를 바꿔."
+)
+
+_DETAIL_WHERE_RE = re.compile(r"detail_sections\[(\d+)\]")
+
+
+def _get_field_text(row: dict[str, object], where: str) -> str:
+    match = _DETAIL_WHERE_RE.match(where)
+    if match:
+        sections = row.get("detail_sections") or []
+        idx = int(match.group(1))
+        if isinstance(sections, list) and idx < len(sections):
+            return str(sections[idx].get("body") or "")
+        return ""
+    return str(row.get(where) or "")
+
+
+def _set_field_text(row: dict[str, object], where: str, text: str) -> None:
+    match = _DETAIL_WHERE_RE.match(where)
+    if match:
+        row["detail_sections"][int(match.group(1))]["body"] = text
+    else:
+        row[where] = text
+
+
+def humanize_articles_data(rows: list[dict[str, object]]) -> dict[str, object]:
+    """선정 기사 JSON 행을 린트하고, 플래그된 필드와 제목 틀 쏠림을 국소 재작성한다.
+
+    rows를 제자리에서 수정하고 변경 내역을 반환한다 (전후 비교·감사용).
+    """
+    from .style_lint import lint_article_fields, lint_titles
+
+    result: dict[str, object] = {"changes": [], "title_changes": [], "calls": 0}
+    if not os.getenv("OPENAI_API_KEY"):
+        return result
+    client = OpenAI(timeout=float(os.getenv("ENRICH_TIMEOUT", "150")), max_retries=1)
+    model = os.getenv("OPENAI_MODEL", "gpt-5.4")
+
+    def _rewrite_row(row: dict[str, object]) -> list[dict[str, str]]:
+        flags = lint_article_fields(row)
+        if not flags:
+            return []
+        by_where: dict[str, list] = {}
+        for flag in flags:
+            by_where.setdefault(flag.where, []).append(flag)
+        payload = {
+            where: {
+                "text": _get_field_text(row, where),
+                "problems": [f"{f.label} — 처방: {f.fix_hint}" for f in fs],
+            }
+            for where, fs in by_where.items()
+        }
+        prompt = (
+            "다음은 사내 AI 뉴스레터에 실릴 한국어 텍스트다. 각 항목의 problems에 "
+            "적힌 AI 문체 신호만 국소적으로 고쳐라.\n"
+            f"{_HUMANIZE_RULES}\n"
+            "입력과 같은 키로 {\"필드명\": \"수정된 전체 텍스트\"} JSON만 반환해.\n\n"
+            f"{json.dumps(payload, ensure_ascii=False)}"
+        )
+        try:
+            response = client.responses.create(
+                model=model, input=prompt, text={"format": {"type": "json_object"}}
+            )
+            usage.record(response)
+            edited = json.loads(response.output_text)
+        except Exception:
+            return []
+        result["calls"] = int(result["calls"]) + 1
+        changed = []
+        for where in by_where:
+            new_text = edited.get(where)
+            if isinstance(new_text, dict):  # 모델이 {"text": ...} 형태로 감싼 경우
+                new_text = new_text.get("text")
+            old_text = _get_field_text(row, where)
+            if isinstance(new_text, str) and new_text.strip() and new_text.strip() != old_text:
+                _set_field_text(row, where, new_text.strip())
+                changed.append({
+                    "article": str(row.get("korean_title") or row.get("title") or ""),
+                    "where": where,
+                    "before": old_text,
+                    "after": new_text.strip(),
+                    "problems": [f.label for f in by_where[where]],
+                })
+        return changed
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for changed in executor.map(_rewrite_row, rows):
+            result["changes"].extend(changed)  # type: ignore[union-attr]
+
+    # 제목은 개별 기사가 아니라 목록의 틀 쏠림이 신호라 한 번에 다룬다.
+    titles = [str(r.get("korean_title") or "") for r in rows]
+    title_flags = lint_titles(titles)
+    if title_flags:
+        problems = "; ".join(f"{f.label} — 처방: {f.fix_hint}" for f in title_flags)
+        prompt = (
+            "다음은 이번 호 사내 AI 뉴스레터의 기사 제목 목록이다. "
+            f"목록 전체의 문제: {problems}\n"
+            "사실과 고유명사를 바꾸지 말고 각 제목을 28자 안팎으로 유지하면서, "
+            "제목 틀이 다양해지도록 다시 써라.\n"
+            "핵심 요건: '회사명, ~' 콤마 틀은 전체의 절반 이하여야 한다. 끝 단어만 "
+            "바꾸는 것은 다양화가 아니다 — 초과분은 문장 구조 자체를 바꿔라.\n"
+            "대체 틀 예시 (사실은 각 기사 것을 유지):\n"
+            "  - 문장형: '구글, Gemini 공개' → 'Gemini가 3.7로 빨라졌다'\n"
+            "  - 수치형: '회사, 신모드 공개' → '7배 빨라진 추론 모드'\n"
+            "  - 결과형: '오라클, 정책 발표' → '오라클이 AI 코드를 막았다'\n"
+            "  - 주제형: '연구진, 기법 제안' → 'KV 캐시 병목을 줄이는 새 기법'\n"
+            "끝 단어도 '공개/출시/발표'로 몰지 마. 바꿀 필요 없는 제목은 그대로 둬.\n"
+            "{\"titles\": [...]} JSON만 반환해 (순서 유지, 개수 동일).\n\n"
+            f"{json.dumps(titles, ensure_ascii=False)}"
+        )
+        try:
+            response = client.responses.create(
+                model=model, input=prompt, text={"format": {"type": "json_object"}}
+            )
+            usage.record(response)
+            new_titles = json.loads(response.output_text).get("titles")
+            result["calls"] = int(result["calls"]) + 1
+            if isinstance(new_titles, list) and len(new_titles) == len(rows):
+                for row, old, new in zip(rows, titles, new_titles):
+                    if isinstance(new, str) and new.strip() and new.strip() != old:
+                        row["korean_title"] = new.strip()
+                        result["title_changes"].append(  # type: ignore[union-attr]
+                            {"before": old, "after": new.strip()}
+                        )
+        except Exception:
+            pass
+    return result
