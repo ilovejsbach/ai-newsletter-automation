@@ -78,8 +78,31 @@ def build_week(output_dir: Path, site_root: Path) -> Path:
         html = html_path.read_text(encoding="utf-8")
         html = EXTERNAL_LINK_RE.sub(r'<a target="_blank" rel="noopener" \1>', html)
         html = _localize_remote_images(html, html_path, dest)
+        is_article = html_path.parent.name == "articles"
+        html = _inject_nav(
+            html,
+            href="../index.html",
+            label="← 뉴스레터 메인" if is_article else "← 전체 호 아카이브",
+        )
         html_path.write_text(html, encoding="utf-8")
     return dest
+
+
+def _inject_nav(html: str, *, href: str, label: str) -> str:
+    """페이지 상단에 상위로 복귀하는 고정 네비게이션 바를 넣는다.
+
+    게시판 iframe 안에서는 브라우저 뒤로가기가 보이지 않으므로, 기사 상세에서
+    주차 메인으로(그리고 주차 메인에서 아카이브로) 돌아갈 길이 화면에 있어야
+    한다. 인라인 스타일이라 어떤 테마의 CSS와도 충돌하지 않는다.
+    """
+    nav = (
+        '<div style="position:sticky;top:0;z-index:90;background:#fff;'
+        "border-bottom:1px solid #e2e2e2;padding:9px 18px;"
+        "font-family:Pretendard,'Malgun Gothic',sans-serif;font-size:13px;\">"
+        f'<a href="{href}" style="color:#31518F;text-decoration:none;font-weight:600;">{label}</a>'
+        "</div>"
+    )
+    return re.sub(r"(<body[^>]*>)", r"\1" + nav.replace("\\", "\\\\"), html, count=1)
 
 
 REMOTE_IMG_RE = re.compile(r'(<img\b[^>]*\bsrc=")(https?://[^"]+)(")')
