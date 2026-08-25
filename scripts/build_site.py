@@ -116,7 +116,11 @@ def _localize_remote_images(html: str, html_path: Path, week_dir: Path) -> str:
     prefix = "assets/remote/" if html_path.parent == week_dir else "../assets/remote/"
 
     def _replace(match: re.Match[str]) -> str:
-        url = match.group(2)
+        # HTML 속 URL은 &가 &amp;로 이스케이프돼 있다 — 그대로 요청하면
+        # 쿼리 파라미터가 깨져 CDN(ctfassets 등)이 400을 반환한다.
+        import html as _html
+
+        url = _html.unescape(match.group(2))
         ext = ".png" if ".png" in url.lower() else ".jpg"
         name = hashlib.sha1(url.encode()).hexdigest()[:16] + ext
         target = remote_dir / name
