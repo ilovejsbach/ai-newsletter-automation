@@ -56,7 +56,12 @@ _READER_PERSONA = (
     "  6. 두루뭉술한 총평으로 문단을 닫지 마: '~라는 점이 크다', '~가 중요해졌다', "
     "'주목할 필요가 있다'. 무엇이 어떻게 달라지는지 구체적으로 써.\n"
     "  7. 한 문단 안에서 어미를 섞지 마.\n"
-    "  8. 숫자와 고유명사는 원문 그대로 쓰고, 원문에 없는 수치는 절대 만들지 마.\n"
+    "  8. 수치의 **값**은 원문 그대로 보존하되 **표기는 한국어로** 옮겨. "
+    "'more than 5 million'→'500만 건 이상', 'roughly 200'→'약 200건', "
+    "'$2 per million tokens'→'100만 토큰당 2달러'. 값을 바꾸거나 원문에 없는 수치를 "
+    "만드는 것만 금지다. 한글 문장 안에 영어 구절('more than', 'per', "
+    "'active and proposed')을 남기지 마 — 모델명·제품명·벤치마크명 같은 고유명사만 "
+    "영문 유지.\n"
     "  9. 내보내기 전에 맞춤법과 오타를 다시 확인해. 특히 기술 용어를 잘못 적지 마"
     "('주론'이 아니라 '추론', '학습'과 '추론'을 섞어 쓰지 않기).\n"
     "  10. AI 특유의 결산·격상 공식 금지: '~로 이어진다'로 문단을 닫기, "
@@ -68,6 +73,21 @@ _READER_PERSONA = (
     "한 기사에 한 번까지만. 문장 관계가 자명하면 접속사 없이 이어.\n"
     "  13. 같은 종결어미('~했다', '~이다' 등)를 3문장 이상 연속하지 마. "
     "문장을 합치거나 어미를 바꿔 리듬에 변화를 줘.\n"
+    "  14. 무생물 주어 의인화 금지: 연구·데이터·기술이 '묻는다/말한다/질문을 던진다'고 "
+    "쓰지 마. '연구에 따르면', '데이터를 보면'처럼 풀어.\n"
+    "  15. 수사적 되물기('정말 ~인지부터 다시 묻는다')로 멋 부리지 마. 결론을 평서문으로 직접 써.\n"
+    "  16. 반쪽 인용 금지: 수치·주장을 옮길 때 원문에서 같은 문장에 붙은 조건·기간·측정 주체·"
+    "트레이드오프 단서(예: '단, 정확도 6%p 손해', '연말까지 한시 가격', '벤더 자체 측정')를 "
+    "반드시 함께 옮겨. 유리한 절반만 발췌하지 마.\n"
+    "  17. 따옴표 규율: 큰따옴표+발언 귀속(\"~라고 말했다\")은 원문에 실재하는 문장(또는 그 "
+    "충실한 번역)에만 써. 편집자의 해석·논평을 따옴표로 싸지 마.\n"
+    "  18. 벤치마크 수치엔 측정 주체(자체 측정인지 독립 평가인지), 가격 할인엔 적용 기간, "
+    "논문 기반 기사엔 논문 공개 시점과 이번 주 보도 시점의 구분을 원문에 있으면 명시해.\n"
+    "  19. 용어는 원문 용어를 우선해 (원문이 'AI-generated video'면 '딥페이크'가 아니라 "
+    "'AI 생성 영상').\n"
+    "  20. 일반 독자가 모를 회사·제품·인물이 처음 나오면 원문에 있는 소개를 한 어절이라도 "
+    "함께 옮겨('수산기업 Cooke', '업무관리 SaaS monday.com'). 원문에 소개가 없으면 "
+    "'고객사인 Cooke'처럼 중립 표지만 붙이고, 원문에 없는 설명을 지어내지 마.\n"
     "친절하되 가르치려 드는 말투('쉽게 말해서', '~라고 생각하면 된다'의 반복)는 피해."
 )
 
@@ -112,6 +132,7 @@ def _structured_prompt(payload: list[dict[str, object]]) -> str:
         "해당 소제목에 쓸 정보가 원문에 부족하면 한 문장으로 부족하다고 써.\n"
         "그 외 필드: one_liner(기사 전체를 40자 이내 한 문장으로), "
         "hook(포털 콜아웃 — 네가 쓴 detail_sections 본문에서 그대로 뽑은 가장 인상적인 문장 하나. "
+        "반드시 한국어 문장이어야 해 — 영어 원문 문장을 그대로 hook으로 쓰지 마. "
         "새 문장을 만들지 말고 본문 문장을 문자 그대로 인용해. 결론을 다 말해버리는 문장보다 "
         "뒷이야기가 궁금해지는 문장을 골라. 40-90자 권장, 목록 항목 말고 서술 문장에서), "
         "korean_title(28자 안팎 — 제목만 읽어도 '누가 무엇을 했는지' 아는 직관적인 문장. "
@@ -446,10 +467,20 @@ def grounding_flags(articles: list[RankedArticle]) -> list[dict[str, object]]:
     """Hallucination spot-check: numbers in the generated body that do not
     appear anywhere in the source article are flagged for human review.
     This is a review aid, not a gate — publication still goes through the
-    final human check, but the flags say exactly where to look."""
+    final human check, but the flags say exactly where to look.
+
+    A number that fails the raw string match (e.g. because the source says
+    'more than 5 million' and the generated text correctly translates that
+    to '500만 건 이상') gets a second chance: if the numeric *value* of the
+    expression it came from matches a numeric value found anywhere in the
+    source (within 1% relative error), it's grounded — translating a unit
+    is not the same as inventing a number. Only numbers that fail both
+    checks are reported as unmatched."""
     flags: list[dict[str, object]] = []
     for idx, article in enumerate(articles, 1):
-        source = _normalized_digits(f"{article.title} {article.summary} {article.body}")
+        source_text = f"{article.title} {article.summary} {article.body}"
+        source = _normalized_digits(source_text)
+        source_values = _numeric_values(source_text)
         for section in article.detail_sections:
             # 표로 들어간 조작 수치도 같은 검사 대상이어야 한다 — 불릿에서
             # 표로 옮겼다고 근거 검증을 피해가면 안 된다.
@@ -457,10 +488,15 @@ def grounding_flags(articles: list[RankedArticle]) -> list[dict[str, object]]:
             table = section.get("table")
             if isinstance(table, dict):
                 text = f"{text} {_table_cell_text(table)}"
+            expr_values = _numeric_expr_values(text)
             missing = [
                 number
                 for number in _significant_numbers(text)
                 if number not in source
+                and not any(
+                    _value_matches(value, source_values)
+                    for value in expr_values.get(number, ())
+                )
             ]
             if missing:
                 flags.append(
@@ -489,14 +525,132 @@ def _table_cell_text(table: dict[str, object]) -> str:
 
 
 def _normalized_digits(text: str) -> str:
-    return re.sub(r"[,\s]", "", text)
+    # 자릿수 구분 콤마만 제거한다. 공백까지 지우면 인접한 숫자가 붙어
+    # 'Opus 5 90.4%' -> '590.4' 같은 유령 숫자가 생긴다 (표 셀에서 실제 발생).
+    return re.sub(r"(?<=\d),(?=\d)", "", text)
 
 
 def _significant_numbers(text: str) -> list[str]:
     """Numbers worth verifying: 2+ digits, excluding plain years (too noisy)."""
-    normalized = re.sub(r"[,\s]", "", text)
+    normalized = re.sub(r"(?<=\d),(?=\d)", "", text)
     numbers = set(re.findall(r"\d{2,}(?:\.\d+)?", normalized))
     return sorted(n for n in numbers if not re.fullmatch(r"(?:19|20)\d{2}", n))
+
+
+# ---------------------------------------------------------------------------
+# Unit-aware value normalization for grounding_flags: a string match rejects
+# '500만' against a source that says '5 million' even though they're the same
+# value. These helpers parse both English and Korean magnitude words into a
+# comparable float so the checker can tell "translated" from "invented".
+
+_EN_UNIT_MULTIPLIERS = {
+    "billion": 1e9,
+    "million": 1e6,
+    "thousand": 1e3,
+    "k": 1e3,
+}
+_EN_UNIT_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*(billion|million|thousand|k)\b", re.IGNORECASE
+)
+# 'B/M/K' 약어 접미사('35B 파라미터', '120M 다운로드'). 대문자만 인정해
+# 'k'(위에서 처리)나 일반 단어와의 충돌을 피한다.
+_EN_ABBREV_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?([BMK])\b")
+_EN_ABBREV_MULTIPLIERS = {"B": 1e9, "M": 1e6, "K": 1e3}
+
+# 긴 단위부터 매칭해야 '2천만'이 '천'+'만'으로 쪼개지지 않는다.
+_KO_UNIT_MULTIPLIERS = {
+    "천만": 1e7,
+    "백만": 1e6,
+    "십만": 1e5,
+    "억": 1e8,
+    "만": 1e4,
+    "천": 1e3,
+    "백": 1e2,
+}
+_KO_UNIT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)(천만|백만|십만|억|만|천|백)")
+
+# 단위가 없는 숫자(콤마 포함) — 표기 차이(공백·자릿수 구분)를 흡수하기 위한 값 비교.
+_PLAIN_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def _numeric_expr_values(text: str) -> dict[str, set[float]]:
+    """텍스트의 각 숫자 표현을 (그 숫자의 콤마 제거 문자열) -> {정규화된 값들}로 매핑한다.
+
+    키는 `_significant_numbers`가 뽑아내는 숫자 문자열과 같은 형태라, 문자열
+    매칭에 실패한 숫자를 이 딕셔너리로 되짚어 '어떤 값으로 해석됐는지' 알 수 있다.
+    """
+    result: dict[str, set[float]] = {}
+    consumed: list[tuple[int, int]] = []
+
+    def _add(digits: str, value: float) -> None:
+        key = digits.replace(",", "")
+        if not key:
+            return
+        result.setdefault(key, set()).add(value)
+
+    for match in _EN_UNIT_RE.finditer(text):
+        try:
+            base = float(match.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        multiplier = _EN_UNIT_MULTIPLIERS[match.group(2).lower()]
+        _add(match.group(1), base * multiplier)
+        consumed.append(match.span())
+
+    for match in _EN_ABBREV_RE.finditer(text):
+        start, end = match.span()
+        if any(s <= start and end <= e for s, e in consumed):
+            continue
+        try:
+            base = float(match.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        _add(match.group(1), base * _EN_ABBREV_MULTIPLIERS[match.group(2)])
+        consumed.append(match.span())
+
+    for match in _KO_UNIT_RE.finditer(text):
+        try:
+            base = float(match.group(1).replace(",", ""))
+        except ValueError:
+            continue
+        multiplier = _KO_UNIT_MULTIPLIERS[match.group(2)]
+        _add(match.group(1), base * multiplier)
+        consumed.append(match.span())
+
+    for match in _PLAIN_NUMBER_RE.finditer(text):
+        start, end = match.span()
+        if any(s <= start and end <= e for s, e in consumed):
+            continue  # 이미 단위 표현의 일부로 처리됨 (예: '5 million'의 '5')
+        digits = match.group(0).replace(",", "")
+        try:
+            value = float(digits)
+        except ValueError:
+            continue
+        _add(digits, value)
+
+    return result
+
+
+def _numeric_values(text: str) -> set[float]:
+    """텍스트에서 발견되는 모든 수치 표현을 정규화된 값 집합으로 변환한다.
+    'more than 5 million' -> {5000000.0}, '500만' -> {5000000.0},
+    '250,000' -> {250000.0}. %·x·배 같은 배율 접미사는 숫자만 취한다."""
+    values: set[float] = set()
+    for value_set in _numeric_expr_values(text).values():
+        values.update(value_set)
+    return values
+
+
+def _value_matches(value: float, source_values: set[float]) -> bool:
+    """value가 source_values 중 하나와 상대 오차 1% 이내로 같은지."""
+    for source_value in source_values:
+        if source_value == 0:
+            if value == 0:
+                return True
+            continue
+        if abs(value - source_value) / abs(source_value) <= 0.01:
+            return True
+    return False
 
 
 def generate_weekly_overview(articles: list[RankedArticle]) -> str:
@@ -711,4 +865,100 @@ def humanize_articles_data(rows: list[dict[str, object]]) -> dict[str, object]:
                         )
         except Exception:
             pass
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 독자 감수 패스: 정규식 린터는 알려진 패턴만 잡는다. 여기서는 반대로
+# '뜻을 두 번 읽어야 하거나 AI 티가 나는' 문장을 사람 독자 관점에서 LLM이
+# 직접 고르게 한다. 과교정을 막기 위해 호 전체에서 최대 5개로 제한하고,
+# 자연스러운 문장을 억지로 지적하지 말라고 명시한다.
+
+_REVIEW_WHERE_RE = re.compile(r"^(\d+):(.+)$")
+
+
+def reader_review_pass(rows: list[dict[str, object]]) -> dict[str, object]:
+    """린트 규칙이 못 잡는 '어렵고 겉멋 든 문장'을 LLM 감수로 찾아 국소 치환한다.
+
+    humanize_articles_data(규칙 위반 → 재작성)와 달리 진단 기준이 독자 체감이라
+    모델이 스스로 최대 5개만 고르게 하고, 치환은 humanize와 동일하게 원문 문장이
+    필드 텍스트에 그대로 있을 때만(문자열 치환) 적용한다.
+    """
+    from .style_lint import TEXT_FIELDS
+
+    result: dict[str, object] = {"flags": [], "applied": 0, "skipped": 0, "calls": 0}
+    if not os.getenv("OPENAI_API_KEY") or not rows:
+        return result
+    client = OpenAI(timeout=float(os.getenv("ENRICH_TIMEOUT", "150")), max_retries=1)
+    model = os.getenv("CRITIC_MODEL", os.getenv("OPENAI_MODEL", "gpt-5.4-mini"))
+
+    # 위치 키는 "행 인덱스:필드명" — 감수 대상이 여러 기사에 걸쳐 있어
+    # humanize의 필드명 단독 where로는 어느 기사인지 구분할 수 없다.
+    payload: dict[str, str] = {}
+    for i, row in enumerate(rows):
+        for field in TEXT_FIELDS:
+            value = row.get(field)
+            if isinstance(value, str) and value.strip():
+                payload[f"{i}:{field}"] = value
+        sections = row.get("detail_sections")
+        if isinstance(sections, list):
+            for j, sec in enumerate(sections):
+                if isinstance(sec, dict) and sec.get("body"):
+                    payload[f"{i}:detail_sections[{j}]"] = str(sec["body"])
+    if not payload:
+        return result
+
+    prompt = (
+        "너는 금융IT 기업의 비개발 직원이다. 이 뉴스레터를 소리 내어 읽는다고 상상하고, "
+        "(a) 뜻을 두 번 읽어야 이해되는 문장 (b) 겉멋 들거나 AI가 쓴 티가 나는 문장을 "
+        "전체에서 최대 5개만 골라라. 각 항목: 필드 위치(where — 아래 입력 JSON의 키를 "
+        "그대로), 원문 문장(original — 입력 텍스트에서 그대로 발췌, 새로 쓰지 마), "
+        "왜 어색한지 한 줄(why), 같은 뜻의 쉬운 대안 한 문장(alt)을 담아라. "
+        "이 호에서 가장 자연스럽게 읽히는 문단 하나를 기준 결로 삼아, alt도 그 결에 맞춰라. "
+        "자연스러운 문장을 억지로 지적하지 마라 — 지적할 문장이 없으면 flags를 빈 "
+        "배열로 반환해.\n"
+        "{\"flags\": [{\"where\": \"...\", \"original\": \"...\", \"why\": \"...\", "
+        "\"alt\": \"...\"}]} 형태의 JSON만 반환해.\n\n"
+        f"{json.dumps(payload, ensure_ascii=False)}"
+    )
+    try:
+        response = client.responses.create(
+            model=model, input=prompt, text={"format": {"type": "json_object"}}
+        )
+        usage.record(response)
+        data = json.loads(response.output_text)
+    except Exception:
+        return result
+    result["calls"] = 1
+    flags = data.get("flags")
+    if not isinstance(flags, list):
+        return result
+
+    for item in flags[:5]:
+        if not isinstance(item, dict):
+            continue
+        where = str(item.get("where") or "")
+        original = str(item.get("original") or "")
+        alt = str(item.get("alt") or "")
+        why = str(item.get("why") or "")
+        entry = {"where": where, "original": original, "why": why, "alt": alt, "applied": False}
+        match = _REVIEW_WHERE_RE.match(where)
+        if not match or not original or not alt:
+            result["skipped"] = int(result["skipped"]) + 1
+            result["flags"].append(entry)  # type: ignore[union-attr]
+            continue
+        idx, field = int(match.group(1)), match.group(2)
+        if idx < 0 or idx >= len(rows):
+            result["skipped"] = int(result["skipped"]) + 1
+            result["flags"].append(entry)  # type: ignore[union-attr]
+            continue
+        row = rows[idx]
+        text = _get_field_text(row, field)
+        if original in text:
+            _set_field_text(row, field, text.replace(original, alt, 1))
+            entry["applied"] = True
+            result["applied"] = int(result["applied"]) + 1
+        else:
+            result["skipped"] = int(result["skipped"]) + 1
+        result["flags"].append(entry)  # type: ignore[union-attr]
     return result

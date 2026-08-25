@@ -753,16 +753,21 @@ def humanize(
         ..., help="기존 산출물 폴더 (예: outputs/2026-08-14_weekly_ai_newsletter_v2)"
     ),
     capture: bool = typer.Option(False, help="재렌더 후 PNG 캡처·게시 패키지까지 갱신."),
+    no_reader: bool = typer.Option(
+        False, "--no-reader", help="독자 감수 패스(LLM이 어렵고 겉멋 든 문장을 직접 골라 고치는 단계)를 건너뜁니다."
+    ),
 ) -> None:
     """AI 문체 린터에 걸린 문장만 LLM으로 국소 재작성하고 HTML을 다시 렌더링합니다.
 
     수집·선별·본문 재생성 없이 문체(AI 티)만 다듬습니다. 원본은
     data/selected_articles.pre_humanize.json으로 한 번만 백업되고,
     전후 린트 결과와 변경 내역은 data/style_report.json에 저장됩니다.
+    린트 재작성 뒤에는 정규식이 못 잡는 문장을 LLM이 직접 골라 고치는
+    독자 감수 패스가 이어집니다 (--no-reader로 생략 가능).
     """
     import json as _json
 
-    from .llm import humanize_articles_data
+    from .llm import humanize_articles_data, reader_review_pass
 
     _enable_os_trust_store()
     usage.reset()
@@ -774,16 +779,30 @@ def humanize(
         raise typer.Exit(1)
     rows = _json.loads(sel_path.read_text(encoding="utf-8"))
     before = lint_selection(rows)
-    if not (before["strong_count"] or before["weak_count"]):
+    has_lint_flags = bool(before["strong_count"] or before["weak_count"])
+    if not has_lint_flags and no_reader:
         console.print("[green]문체 린트에 걸린 항목이 없습니다. 재작성할 것이 없어요.[/green]")
         return
     backup = data_dir / "selected_articles.pre_humanize.json"
     if not backup.exists():
         backup.write_text(sel_path.read_text(encoding="utf-8"), encoding="utf-8")
-    edits = humanize_articles_data(rows)
+    if has_lint_flags:
+        edits = humanize_articles_data(rows)
+    else:
+        edits = {"changes": [], "title_changes": [], "calls": 0}
     after = lint_selection(rows)
+    reader_review = (
+        reader_review_pass(rows) if not no_reader
+        else {"flags": [], "applied": 0, "skipped": 0, "calls": 0}
+    )
     sel_path.write_text(_json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
-    style_report = {"before": before, "after": after, "edits": edits, "usage": usage.summary()}
+    style_report = {
+        "before": before,
+        "after": after,
+        "edits": edits,
+        "reader_review": reader_review,
+        "usage": usage.summary(),
+    }
     (data_dir / "style_report.json").write_text(
         _json.dumps(style_report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -794,6 +813,11 @@ def humanize(
         f"중 {before['weak_count']}→{after['weak_count']} | "
         f"LLM {edits['calls']}회 호출"
     )
+    if not no_reader:
+        console.print(
+            f"[bold green]독자 감수[/bold green]: 지적 {len(reader_review['flags'])}건 중 "
+            f"반영 {reader_review['applied']}건"
+        )
     console.print(f"[dim]전후 비교: {data_dir / 'style_report.json'} (원본 백업: {backup.name})[/dim]")
     rerender(output_dir=output_dir, capture=capture, theme="", assign_sections=False, thumbs=None)
 

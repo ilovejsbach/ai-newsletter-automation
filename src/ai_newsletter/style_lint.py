@@ -78,7 +78,44 @@ _RULES: list[_Rule] = [
           "문장 관계가 자명한 것부터 삭제", min_count=3),
     _Rule("I-1", "중", "'~는 것이다' 형식명사 종결 반복", re.compile(r"[는은ㄴ] (것|셈)이다"),
           "직접 종결로", min_count=3),
+    _Rule(
+        "S-8", "강", "무생물 주어 의인화",
+        re.compile(
+            r"(연구|논문|보고서|데이터|숫자|그래프|기술|모델|발표|결과)[은는이가] "
+            r"[^.!?\n]{0,40}(묻는다|묻고 있|말한다|말하고 있|이야기한다|답한다|던진다|던지고 있)"
+        ),
+        "'연구에 따르면 ~다'처럼 사람/출처 중심으로",
+    ),
+    _Rule(
+        "K-4", "강", "수사적 되물기 공식",
+        re.compile(
+            r"(정말|과연|진짜)[^.!?\n]{0,25}(인지|일까)(부터|를)? ?(다시 )?(묻|따져|살펴|생각해)"
+            r"|질문을 던진다"
+        ),
+        "핵심 결론을 평서문으로 직접",
+    ),
+    _Rule("S-4", "중", "'~기 시작했다' 남용", re.compile(r"[기게] 시작(했|한)다"),
+          "점진 변화가 아니면 단순 과거로", min_count=2),
+    _Rule("S-5", "중", "'-시키다' 남용", re.compile(r"(설득|개선|향상|증가|감소|변화|발전)시[키켰]"),
+          "'-하다'로", min_count=2),
+    _Rule("S-9", "중", "'~하게 만들다' 직역", re.compile(r"게 만들(었|든|고|어)"),
+          "자동사·형용사로 환원", min_count=2),
 ]
+
+# E-9: 한글 문장 속 영어구 잔존. 프롬프트가 '숫자는 원문 그대로'를 지시하면
+# 모델이 숫자 주변 영어구('more than 5 million')까지 통째로 보존하는 과잉
+# 적용을 저지른다 — 값은 지키되 표기는 한국어로 옮기라는 규칙 위반 신호.
+_EN_FUNCTION_WORDS = {
+    "more", "than", "per", "with", "of", "for", "and", "the", "at", "to",
+    "in", "by", "from", "about", "roughly", "approximately", "least", "up",
+    "as", "such",
+}
+_EN_TOKEN_ALT = r"(?:[a-z]+|\d[\d,]*(?:\.\d+)?%?)"
+# 소문자 라틴 단어(또는 숫자) 2개 이상이 공백으로 이어진 구간을 통째로 잡는다.
+# 한글 조사가 마지막 단어에 바로 붙어도(예: 'projects와') 매칭에는 영향 없다 —
+# [a-z]+는 한글 문자에서 멈추고 \b는 요구하지 않는다.
+_EN_PHRASE_RUN_RE = re.compile(rf"\b{_EN_TOKEN_ALT}(?:[ \t]+{_EN_TOKEN_ALT})+")
+_HANGUL_RE = re.compile(r"[가-힣]")
 
 # 헤드라인 공식 (C-5): 'X: Y' 콜론 공식, '~의 시대' 류.
 _TITLE_COLON_RE = re.compile(r"^[^:]{2,30}:\s")
@@ -131,6 +168,34 @@ def lint_text(text: str, where: str) -> list[StyleFlag]:
         else:
             run = 1
         prev = end
+
+    # E-9: 한글 문장 속에 영어 기능어를 낀 영어구가 통째로 남아있는지.
+    for sent in sents or [text]:
+        if not _HANGUL_RE.search(sent):
+            continue
+        for match in _EN_PHRASE_RUN_RE.finditer(sent):
+            words = [t for t in match.group(0).split() if t.isalpha()]
+            if len(words) >= 2 and any(w in _EN_FUNCTION_WORDS for w in words):
+                flags.append(StyleFlag(
+                    "E-9", "강", "한글 문장 속 영어구 잔존", where,
+                    match.group(0).strip()[:60],
+                    "값은 유지하고 표기를 한국어로 (예: 'more than 5 million' → "
+                    "'500만 건 이상')",
+                ))
+
+    # E-10: 통째로 영어인 문장 — E-9는 '한글 문장 속' 영어구만 보므로,
+    # 한글이 하나도 없는 문장(원문 복사 인용 등)은 별도로 잡아야 한다.
+    # 라틴 단어 4개 이상이고 한글이 없으면 번역 누락으로 본다 (모델명 나열
+    # 같은 짧은 조각은 4단어 미만이라 통과).
+    for sent in _sentences(text):
+        if re.search(r"[가-힣]", sent):
+            continue
+        latin_words = re.findall(r"[A-Za-z][A-Za-z'’\-]*", sent)
+        if len(latin_words) >= 4:
+            flags.append(StyleFlag(
+                "E-10", "강", "번역 안 된 영어 문장", where, sent[:60],
+                "원문 인용이 필요하면 충실한 한국어 번역으로 바꾸고 화자를 명시",
+            ))
 
     # C-3b: 문단(빈 줄 기준) 대부분이 문장 하나짜리면, 문장마다 줄바꿈만 하고
     # 실제로는 문단으로 묶지 않은 옛 스타일 — 흐름 문단이 아니라 리스트처럼

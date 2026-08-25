@@ -102,6 +102,13 @@ def discovery_channel_of(article: Article) -> str:
 # official Google security post went out credited to "HN Trending (AI)".
 DISCOVERY_CHANNEL_IDS = {"hn-trending", "hf-daily-papers"}
 
+# Multi-tenant publishing platforms with no per-author extraction (unlike
+# github.com/huggingface.co, which resolve to the repo/model owner below).
+# Collapsing these to the bare platform domain would erase who actually wrote
+# the piece (e.g. a Substack newsletter becoming plain "Substack"), so the
+# curated feed's own name is kept for them instead.
+_MULTI_TENANT_DOMAINS_WITHOUT_OWNER = {"substack.com"}
+
 # Bylines for domains we surface through those channels. Anything unmapped falls
 # back to the bare domain, which is still accurate — unlike the channel name.
 _PUBLISHER_NAMES = {
@@ -160,19 +167,28 @@ _PUBLISHER_NAMES = {
 def display_publisher(article: Article) -> str:
     """The byline to print — who published this, not how we found it.
 
-    Curated feeds keep their configured name ("OpenAI News", "MarkTechPost"),
-    because there the feed *is* the publisher. Only discovery channels are
-    resolved from the article URL.
+    Discovery channels (HN, HF daily papers) always resolve from the URL,
+    since their source_name only describes how the story was found. Curated
+    feeds normally keep their configured name ("MarkTechPost", "AlphaSignal"),
+    because there the feed *is* the publisher — but when that name is just a
+    company's blog under a house label ("Google DeepMind Blog" for
+    deepmind.google, "OpenAI News" for openai.com), the URL-resolved name
+    wins instead, so the same outlet reads the same way whether the
+    newsletter reached it through its own feed or through HN/HF. A fact-check
+    of the 8/18 issue flagged exactly this ("Google DeepMind Blog" shown as
+    the byline where "Google DeepMind" was the accurate one).
     """
+    domain = registrable_domain(article.url)
+    # A repo/model host is not the author. Crediting a Y Combinator project to
+    # plain "GitHub" (or a curated "GitHub AI Repositories" feed label) names
+    # the platform and hides who actually published it.
+    if domain in ("github.com", "huggingface.co"):
+        owner = owner_key_of(article)
+        if owner:
+            label = _PUBLISHER_NAMES[domain]
+            return f"{label} · {owner.split(':', 1)[1]}"
+    if domain and domain not in _MULTI_TENANT_DOMAINS_WITHOUT_OWNER and domain in _PUBLISHER_NAMES:
+        return _PUBLISHER_NAMES[domain]
     if article.source_id not in DISCOVERY_CHANNEL_IDS:
         return article.source_name
-    domain = registrable_domain(article.url)
-    if not domain:
-        return article.source_name
-    # A repo host is not the author. Crediting a Y Combinator project to plain
-    # "GitHub" names the platform and hides who actually published it.
-    owner = owner_key_of(article)
-    if domain in ("github.com", "huggingface.co") and owner:
-        label = _PUBLISHER_NAMES[domain]
-        return f"{label} · {owner.split(':', 1)[1]}"
-    return _PUBLISHER_NAMES.get(domain, domain)
+    return domain or article.source_name

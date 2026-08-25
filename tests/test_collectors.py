@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
+
 from bs4 import BeautifulSoup
 
-from ai_newsletter.collectors import _clean_title, _extract_tables, _find_info_images
+from ai_newsletter.collectors import Collector, _clean_title, _extract_tables, _find_info_images
+from ai_newsletter.models import CollectionOptions, SourceConfig
 
 
 def test_strips_trailing_date_and_byline():
@@ -101,3 +104,98 @@ def test_find_info_images_excludes_small_icon():
     soup = BeautifulSoup(html, "html.parser")
     body_imgs = soup.select("img[src]")
     assert _find_info_images(body_imgs) == []
+
+
+class _FakeResponse:
+    """httpx.Response 대역 — .raise_for_status()/.json()/.text만 흉내."""
+
+    def __init__(self, *, json_data=None, text: str = "") -> None:
+        self._json = json_data
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def json(self):
+        return self._json
+
+
+_ARXIV_ATOM = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<feed xmlns="http://www.w3.org/2005/Atom">'
+    "<entry><published>2026-08-01T09:30:00Z</published></entry>"
+    "</feed>"
+)
+
+
+def test_arxiv_v1_published_at_parses_published_field(monkeypatch):
+    collector = Collector()
+
+    def fake_get(url, params=None):
+        assert "export.arxiv.org" in url
+        assert params == {"id_list": "2401.12345"}
+        return _FakeResponse(text=_ARXIV_ATOM)
+
+    monkeypatch.setattr(collector.client, "get", fake_get)
+    result = collector._arxiv_v1_published_at("2401.12345")
+    assert result == datetime(2026, 8, 1, 9, 30, 0, tzinfo=timezone.utc)
+    collector.close()
+
+
+def test_arxiv_v1_published_at_returns_none_on_failure(monkeypatch):
+    collector = Collector()
+    monkeypatch.setattr(
+        collector.client, "get", lambda url, params=None: (_ for _ in ()).throw(RuntimeError("down"))
+    )
+    assert collector._arxiv_v1_published_at("2401.12345") is None
+    collector.close()
+
+
+def _hfpapers_daily_payload() -> list[dict]:
+    return [
+        {
+            "publishedAt": "2026-08-20T00:00:00Z",
+            "numComments": 3,
+            "paper": {
+                "id": "2401.12345",
+                "title": "Sample Paper",
+                "summary": "Sample abstract.",
+                "upvotes": 42,
+                "publishedAt": "2026-08-20T00:00:00Z",
+            },
+        }
+    ]
+
+
+def test_collect_hfpapers_prefers_arxiv_v1_published_date(monkeypatch):
+    collector = Collector(options=CollectionOptions(require_dates=False, strict_week=False))
+    source = SourceConfig(id="hf-daily-papers", name="HF Daily Papers", kind="hfpapers")
+
+    def fake_get(url, params=None):
+        if "daily_papers" in url:
+            return _FakeResponse(json_data=_hfpapers_daily_payload())
+        return _FakeResponse(text=_ARXIV_ATOM)
+
+    monkeypatch.setattr(collector.client, "get", fake_get)
+    articles = collector.collect_hfpapers(source, days=7)
+    assert len(articles) == 1
+    # HF의 publishedAt(8/20)이 아니라 arXiv v1 제출일(8/1)을 써야 한다.
+    assert articles[0].published_at == datetime(2026, 8, 1, 9, 30, 0, tzinfo=timezone.utc)
+    collector.close()
+
+
+def test_collect_hfpapers_keeps_hf_date_when_arxiv_lookup_fails(monkeypatch):
+    collector = Collector(options=CollectionOptions(require_dates=False, strict_week=False))
+    source = SourceConfig(id="hf-daily-papers", name="HF Daily Papers", kind="hfpapers")
+
+    def fake_get(url, params=None):
+        if "daily_papers" in url:
+            return _FakeResponse(json_data=_hfpapers_daily_payload())
+        raise RuntimeError("arxiv down")
+
+    monkeypatch.setattr(collector.client, "get", fake_get)
+    articles = collector.collect_hfpapers(source, days=7)
+    assert len(articles) == 1
+    # arXiv 호출 실패 시 HF의 publishedAt을 그대로 유지해야 한다.
+    assert articles[0].published_at == datetime(2026, 8, 20, 0, 0, 0, tzinfo=timezone.utc)
+    collector.close()

@@ -306,6 +306,32 @@ class Collector:
             )
         return articles
 
+    def _arxiv_v1_published_at(self, arxiv_id: str) -> datetime | None:
+        """arXiv 원문 API에서 v1 제출일을 가져온다.
+
+        HF daily_papers의 publishedAt은 'HF 데일리 페이퍼에 오른 시점'이라 실제
+        논문이 처음 공개된 날짜와 며칠씩 어긋날 수 있다 (외부 팩트체크에서 지적된
+        메타데이터 오류 중 하나). arXiv API의 <published>는 v1 제출일을 가리키므로
+        더 신뢰할 수 있는 소스다. 주간 후보가 2~3건 수준이라 논문별 호출을 허용한다.
+        """
+        base_id = re.sub(r"v\d+$", "", arxiv_id)
+        try:
+            resp = self.client.get(
+                "https://export.arxiv.org/api/query", params={"id_list": base_id}
+            )
+            resp.raise_for_status()
+            root = ET.fromstring(resp.text)
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            entry = root.find("atom:entry", ns)
+            if entry is None:
+                return None
+            published_el = entry.find("atom:published", ns)
+            if published_el is None or not (published_el.text or "").strip():
+                return None
+            return parse_datetime(published_el.text)
+        except Exception:
+            return None
+
     def collect_hfpapers(self, source: SourceConfig, days: int) -> list[Article]:
         """Papers the ML community actually upvoted, linked to the original arXiv entry.
 
@@ -341,6 +367,9 @@ class Collector:
             if upvotes < min_upvotes:
                 continue
             published = parse_datetime(item.get("publishedAt") or paper.get("publishedAt"))
+            arxiv_published = self._arxiv_v1_published_at(arxiv_id)
+            if arxiv_published:
+                published = arxiv_published
             if self.options.strict_week and _outside_window(published, cutoff):
                 continue
             if self.options.require_dates and not published:
