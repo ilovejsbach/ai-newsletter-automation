@@ -1268,7 +1268,9 @@ def render_html(package: NewsletterPackage) -> str:
     radar_title = "이번 주 이슈 레이더"
     radar_hint = ""
     if _is_sectioned(package.articles):
-        radar_hint = '<p class="radar-hint">번호는 상세 아티클(첨부 이미지) 번호와 동일합니다</p>'
+        # 배포가 이미지 첨부에서 HTML(iframe)로 바뀌어 안내 문구는 제거했다 —
+        # 번호는 페이지 안 기사 순번으로 자명하다.
+        radar_hint = ""
         # Radar = TOC-style one-liners for the top stories; sections below carry
         # the full cards, so nothing is skipped.
         radar_title = "이번 주 레이더"
