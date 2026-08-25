@@ -1409,11 +1409,26 @@ def _callout_text(article: RankedArticle, limit: int = 90) -> str:
     return _truncate_text(text, limit)
 
 
+def _yama_text(article: RankedArticle) -> str:
+    """카드용 야마: 요약의 첫 문장. hook이 경고·디테일로 흘러도 카드에서
+    '이 기사가 다루는 것이 무엇인지'는 항상 보장한다 (SAM 사례 개선)."""
+    summary = article.korean_summary or article.summary or ""
+    match = re.match(r"[^.!?]*[.!?]", summary.strip())
+    return (match.group(0) if match else summary).strip()
+
+
 def _story_row(index: int, article: RankedArticle, thumb: bool = False) -> str:
-    """본지는 낚시(teaser): 제목 + 본문 콜아웃만 던지고, 내용 전부는
+    """본지는 낚시(teaser): 제목 + 야마 한 문장 + 본문 콜아웃. 내용 전부는
     상세 아티클(첨부 이미지)로 유도한다. thumb=True면 대표 이미지 썸네일 표시."""
     detail_href = f"articles/{escape(article_filename(index, article))}"
     hook = _callout_text(article, 110)
+    yama = _yama_text(article)
+    # 야마와 hook이 사실상 같은 문장이면 중복 노출하지 않는다.
+    yama_html = (
+        f'\n    <p class="story-yama">{escape(yama)}</p>'
+        if yama and yama[:20] != hook[:20]
+        else ""
+    )
     # 배포물이 PNG이므로 썸네일은 캡처 시점에 확실히 존재하는 로컬 이미지만 쓴다.
     # (원격 URL 폴백은 캡처 때 빈 박스가 될 수 있어 제외 — 없으면 텍스트 행으로)
     image = article.local_image if thumb else ""
@@ -1422,7 +1437,7 @@ def _story_row(index: int, article: RankedArticle, thumb: bool = False) -> str:
 <article class="story has-thumb" id="story-{index:02d}">
   <div class="story-main">
     <p class="source">{_article_meta(index, article)}</p>
-    <h3><a href="{detail_href}">{escape(article.korean_title or article.title)}</a></h3>
+    <h3><a href="{detail_href}">{escape(article.korean_title or article.title)}</a></h3>{yama_html}
     <p class="story-hook">&ldquo;{escape(hook)}&rdquo;</p>
   </div>
   <div class="story-thumb"><img src="{escape(image)}" alt="대표 이미지"><span>{index:02d}</span></div>
@@ -1432,7 +1447,7 @@ def _story_row(index: int, article: RankedArticle, thumb: bool = False) -> str:
 <article class="story" id="story-{index:02d}">
   <span class="story-no">{index:02d}</span>
   <p class="source">{_article_meta(index, article)}</p>
-  <h3><a href="{detail_href}">{escape(article.korean_title or article.title)}</a></h3>
+  <h3><a href="{detail_href}">{escape(article.korean_title or article.title)}</a></h3>{yama_html}
   <p class="story-hook">&ldquo;{escape(hook)}&rdquo;</p>
 </article>
 """
@@ -2016,6 +2031,7 @@ th { width: 140px; color: var(--muted); font-weight: 700; }
 .story-thumb span { position: absolute; top: 8px; left: 8px; background: rgba(17,23,33,.82); color: #fff; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 4px; }
 
 /* 콜아웃(pull quote): 본문에서 그대로 인용한 한 문장. --sc는 섹션 색을 상속받는다 */
+.story-yama { margin: 4px 0 2px; color: #4a5361; font-size: 15px; line-height: 1.6; max-width: 720px; }
 .story-hook { margin: 2px 0 0; padding: 2px 0 2px 14px; border-left: 3px solid var(--sc, var(--accent)); color: #333d4b; font-size: 16.5px; font-weight: 500; line-height: 1.65; max-width: 720px; }
 .story-summary { margin: 0 0 10px; color: #333d4b; }
 .slots { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); }
