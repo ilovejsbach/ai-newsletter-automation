@@ -137,7 +137,9 @@ def build(
         Path("config/sources.research.yaml"), help="Research source YAML for --include-research."
     ),
     capture: bool = typer.Option(
-        True, help="PNG 캡처·게시 패키지 생성 여부. --no-capture면 HTML까지만 (나중에 `capture` 명령으로 보완)."
+        False,
+        help="PNG 캡처·게시 패키지 생성 여부. 배포가 iframe HTML(깃랩 Pages)로 바뀌어 "
+        "기본 꺼짐 — 이미지 게시가 필요하면 --capture 또는 `capture` 명령.",
     ),
     theme: Literal["classic", "editorial", "magazine", "report"] = typer.Option(
         "editorial",
@@ -556,7 +558,9 @@ def _interactive() -> None:
     theme_pick = Prompt.ask("번호", choices=["1", "2", "3", "4"], default="1", show_choices=False)
     theme = _THEME_BY_PICK[theme_pick]
 
-    do_capture = Confirm.ask("PNG 캡처·게시 패키지까지 생성할까요?", default=True)
+    do_capture = Confirm.ask(
+        "PNG 캡처·게시 패키지까지 생성할까요? (iframe 배포 전환으로 기본 꺼짐)", default=False
+    )
     do_thumbs = Confirm.ask("본지 기사 행에 대표 이미지 썸네일을 넣을까요?", default=True)
 
     console.print("채점 루브릭: 1. standard(기존)  2. sota(SOTA 라이프사이클 가중 — 비교 실험용)")
