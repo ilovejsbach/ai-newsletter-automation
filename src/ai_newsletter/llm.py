@@ -111,7 +111,10 @@ def _structured_prompt(payload: list[dict[str, object]]) -> str:
         "1) '핵심 브리핑' — 사실만. 첫 문단은 반드시 '이것이 무엇이고 어떤 문제를 "
         "푸는가'를 비전문가 기준 2~3문장으로 먼저 써 — 라이선스·배포 형식·주의 문구 같은 "
         "지엽 팩트로 시작하지 마. 그다음 원문에서 확인되는 발표/변경/수치를 4-10문장으로 상세히. "
-        "스펙·설정값·가격·제약처럼 나열이 읽기 쉬운 내용은 '- '로 시작하는 목록을 적극 활용해.\n"
+        "스펙·설정값·가격·제약처럼 나열이 읽기 쉬운 내용은 '- '로 시작하는 목록을 적극 활용해. "
+        "payload에 followup_of가 있으면 이 소식은 지난 호에서 다룬 소식의 후속이야 — "
+        "리드 문단에서 '지난 호에서 다룬 ~의 후속 소식'임을 자연스럽게 한 번 밝혀 "
+        "(followup_of에 적힌 주차와 제목을 참조하되, 없는 내용을 지어내지 마).\n"
         "2) 섹션 특화 소제목 — 각 기사 payload의 section 값에 맞는 소제목과 관점을 써. "
         f"section이 없거나 목록에 없으면 '{_DEFAULT_SLOT_HEADING}'로 일반 맥락을 써.\n"
         f"{slot_rules}\n"
@@ -171,7 +174,7 @@ def _structured_prompt(payload: list[dict[str, object]]) -> str:
 
 
 def _article_payload(idx: int, a: RankedArticle) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "index": idx,
         "title": a.title,
         "source": a.source_name,
@@ -182,6 +185,9 @@ def _article_payload(idx: int, a: RankedArticle) -> dict[str, object]:
         "section": a.section,
         "related_coverage": a.related_coverage,
     }
+    if a.followup_of:
+        payload["followup_of"] = a.followup_of
+    return payload
 
 
 def enrich_with_openai(

@@ -38,6 +38,7 @@ from difflib import SequenceMatcher
 
 from .editorial_selection import _heuristic_score, _is_publishable, _llm_score
 from .heat import _hn_points, _log_norm, cluster_heat, social_matches, topic_tokens
+from .history import HistoryIndex, apply_history
 from .identity import owner_key_of, publisher_of
 from .models import Article, RankedArticle
 from .ranking import _normalize_title
@@ -77,6 +78,7 @@ def select_heat_articles(
     guarantee_min_heat: float = 45.0,
     cap_override_gap: float = 15.0,
     heat_bonus_max: float = 20.0,
+    history: "HistoryIndex | None" = None,
 ) -> tuple[list[RankedArticle], dict[str, object]]:
     pool, merged_dupes = _merge_duplicates(candidates)
     pool = [a for a in pool if _is_publishable(a) or _is_loud(a)]
@@ -95,6 +97,11 @@ def select_heat_articles(
 
     clusters = _cluster(scored)
     ranked = _build_representatives(clusters, social_articles or [], heat_bonus_max)
+    # 주차 간 이력(--history): 캡·쿼터가 보기 전에 재탕을 감점하고 후속을 표시한다.
+    # history가 None이면(기본) 아무 것도 하지 않아 기존 동작과 동일하다.
+    history_hits: list[dict[str, object]] = []
+    if history:
+        history_hits = apply_history(ranked, history)
     ranked.sort(key=lambda a: (-a.score, a.id))
 
     selected, fill_report = _fill(
@@ -128,6 +135,8 @@ def select_heat_articles(
         merged_dupes=merged_dupes,
         llm_omissions=omitted,
     )
+    if history is not None:
+        report["history"] = {"weeks": history.weeks, "hits": history_hits}
     return selected, report
 
 

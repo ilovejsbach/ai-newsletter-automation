@@ -66,6 +66,9 @@ class RankedArticle(Article):
     one_liner: str = ""
     hook: str = ""
     related_coverage: list[str] = Field(default_factory=list)
+    # 지난 호에서 다룬 소식의 후속일 때 "<주차>호 '<제목>'" 형태로 채워진다
+    # (--history 옵션). 편집 LLM이 리드 문장에서 후속임을 밝히는 데 쓴다.
+    followup_of: str = ""
     korean_title: str = ""
     korean_summary: str = ""
     why_it_matters: str = ""

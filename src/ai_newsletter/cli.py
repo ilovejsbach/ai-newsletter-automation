@@ -152,6 +152,17 @@ def build(
         "standard",
         help="채점 루브릭: standard(기존) | sota(프론티어 SOTA 출시·중단·재배포 라이프사이클 가중). 비교 실험용.",
     ),
+    history: bool = typer.Option(
+        False,
+        "--history/--no-history",
+        help="주차 간 이력 참조 (heat 모드 전용, 기본 꺼짐 — 끄면 기존 선정 동작과 동일). "
+        "지난 호 selected_articles.json과 대조해 같은 URL 재탕 -30점, 같은 발행사의 "
+        "유사 재탕 -20점을 주고, 후속 보도에는 감점 없이 '지난 호 후속' 표시를 붙인다. "
+        "판정 전부가 generation_report.json의 history 항목에 남는다.",
+    ),
+    history_weeks: int = typer.Option(
+        4, min=1, max=26, help="--history가 참조할 최근 주차 수 (기본 4주)."
+    ),
 ) -> None:
     """Collect, select, and render the weekly newsletter with explicit flags."""
     _run_build(
@@ -180,6 +191,8 @@ def build(
         theme=theme,
         thumbs=thumbs,
         rubric=rubric,
+        history=history,
+        history_weeks=history_weeks,
     )
 
 
@@ -210,10 +223,16 @@ def _run_build(
     theme: str = "editorial",
     thumbs: bool = True,
     rubric: str = "standard",
+    history: bool = False,
+    history_weeks: int = 4,
 ) -> None:
     usage.reset()
     t0 = time.monotonic()
     load_environment(env_file)
+    if history and selection_mode != "heat":
+        console.print(
+            f"[yellow]--history는 heat 모드 전용이라 무시됩니다 (현재: {selection_mode}).[/yellow]"
+        )
     source_list = load_sources(sources)
     all_sources = list(source_list.sources)
     if include_candidates and candidate_sources and candidate_sources.exists():
@@ -345,12 +364,25 @@ def _run_build(
             rubric=rubric,
         )
     elif selection_mode == "heat":
+        history_index = None
+        if history:
+            from .history import load_history
+
+            history_index = load_history(output, weeks=history_weeks)
+            if history_index:
+                console.print(
+                    f"[cyan]이력 참조: {len(history_index.weeks)}개 주차 "
+                    f"({', '.join(history_index.weeks)}) {len(history_index.entries)}건과 대조[/cyan]"
+                )
+            else:
+                console.print("[dim]이력 참조: 과거 주차 산출물이 없어 대조 없이 진행[/dim]")
         selected, report = select_heat_articles(
             candidates,
             limit=limit,
             use_llm=use_llm,
             social_articles=social_candidates,
             rubric=rubric,
+            history=history_index,
         )
     elif selection_mode == "rank" or not issue_radar:
         selected = rank_articles(candidates, limit=limit)
