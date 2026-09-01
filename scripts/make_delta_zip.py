@@ -1,7 +1,8 @@
 """주간 델타 zip 생성 — 내부망으로 옮길 '변경분만' 묶는다.
 
-사용법: uv run python scripts/make_delta_zip.py <사이트_저장소> [주차(YYYY-MM-DD)]
-        (주차 생략 시 가장 최신 주차 폴더)
+사용법: uv run python scripts/make_delta_zip.py <사이트_저장소> [주차]
+        주차: YYYY-MM-DD (정식판) 또는 YYYY-MM-DD-접미사 (비교판, 예: -history)
+        생략 시 가장 최신 정식판(날짜) 폴더
 
 내부망 절차가 "전체 zip에서 3개 골라 복사"가 아니라 "델타 zip을 git 작업
 폴더에 그대로 풀고 push"가 되도록, zip 안 경로를 저장소 루트 기준으로 담는다.
@@ -21,7 +22,8 @@ import sys
 import zipfile
 from pathlib import Path
 
-WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+WEEK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(-[a-z0-9][a-z0-9-]*)?$")
+PURE_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _git(site: Path, *args: str) -> str:
@@ -37,12 +39,18 @@ def main() -> None:
     weeks = sorted(d.name for d in site.iterdir() if d.is_dir() and WEEK_RE.match(d.name))
     if not weeks:
         sys.exit("주차 폴더(YYYY-MM-DD)가 없습니다.")
-    week = sys.argv[2] if len(sys.argv) > 2 else weeks[-1]
+    if len(sys.argv) > 2:
+        week = sys.argv[2]
+    else:  # 기본은 최신 '정식판'(순수 날짜) — 비교판은 명시했을 때만 대상이 된다.
+        dated = [w for w in weeks if PURE_DATE_RE.match(w)]
+        if not dated:
+            sys.exit("정식판(YYYY-MM-DD) 폴더가 없습니다 — 비교판은 주차를 명시하세요.")
+        week = dated[-1]
     if week not in weeks:
         sys.exit(f"주차 폴더가 없습니다: {week}")
 
     include: list[Path] = []
-    for name in (week, "index.html", "latest/index.html"):
+    for name in (week, "index.html", "latest/index.html", "post_meta.json"):
         path = site / name
         if path.is_dir():
             include.extend(p for p in sorted(path.rglob("*")) if p.is_file() and p.name != ".DS_Store")

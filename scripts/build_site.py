@@ -22,10 +22,12 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import sys
 import urllib.request
+from datetime import date, timedelta
 from pathlib import Path
 
 FONT_URL = (
@@ -142,6 +144,28 @@ def _localize_remote_images(html: str, html_path: Path, week_dir: Path) -> str:
     return REMOTE_IMG_RE.sub(_replace, html)
 
 
+def write_post_meta(site_root: Path, folder_name: str, tags: list[str] | None = None) -> None:
+    """게시판 게시 배치가 파싱 없이 읽을 배포 메타데이터를 사이트 루트에 남긴다.
+
+    업무망 배치는 델타 zip을 풀고 이 파일만 읽어 iframe src(사내 Pages 주소 +
+    iframe_path)와 게시 제목·태그를 채운다. track이 official이 아니면(참조용
+    비교판) 게시 배치는 건너뛴다.
+    """
+    week = folder_name[:10]
+    end = date.fromisoformat(week)
+    start = end - timedelta(days=7)
+    meta = {
+        "week": week,
+        "track": "official" if folder_name == week else folder_name[11:],
+        "iframe_path": f"{folder_name}/",
+        "title": f"AI 주간 뉴스레터 | {start.strftime('%Y.%m.%d')} - {end.strftime('%Y.%m.%d')}",
+        "tags": tags or ["AI", "주간동향"],
+    }
+    (site_root / "post_meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def rebuild_indexes(site_root: Path) -> None:
     # 날짜 폴더가 정식판, '날짜-접미사' 폴더는 같은 주의 비교판이다.
     all_dirs = sorted(
@@ -213,6 +237,7 @@ def main() -> None:
         sys.exit(f"폴더명은 'YYYY-MM-DD' 또는 'YYYY-MM-DD-접미사' 형식이어야 함: {dest_name}")
     site_root.mkdir(parents=True, exist_ok=True)
     dest = build_week(output_dir, site_root, dest_name)
+    write_post_meta(site_root, dest.name)
     rebuild_indexes(site_root)
     bad = validate(site_root)
     print(f"생성: {dest}")
