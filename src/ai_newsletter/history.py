@@ -32,15 +32,29 @@ SIMILAR_PENALTY = 20.0
 # 안에서는 2개(클러스터 병합과 같은 기준)면 충분하다. 발행사가 다른 후속 판정은
 # 오인하면 본문에 잘못된 '지난 호 후속' 문구가 들어가므로 더 강한 근거를 요구한다.
 _TITLE_SIM_THRESHOLD = 0.75
-_TOKEN_OVERLAP_WEAK = 2   # 같은 발행사/소유자일 때
+_TOKEN_OVERLAP_WEAK = 2   # 같은 발행사/소유자일 때 (제목 유사도 하한과 함께)
+_WEAK_RATIO_FLOOR = 0.4   # 약한 근거 경로의 제목 유사도 하한
 _TOKEN_OVERLAP_STRONG = 3  # 발행사가 다를 때 (또는 제목 유사도로 대신)
+
+# 여기 도메인들은 '발행사'가 아니라 플랫폼이다 — arXiv 논문끼리, GitHub 레포끼리는
+# 전부 같은 도메인이라 발행사 일치가 아무 근거도 되지 않는다 (실측: 서로 다른
+# arXiv 논문 4쌍이 같은 발행사로 묶였다). 이들은 owner(저자/조직) 일치만 인정한다.
+_PLATFORM_PUBLISHERS = {"arxiv.org", "github.com", "huggingface.co"}
 
 _WEEK_DIR_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_weekly_ai_newsletter(?:_v(\d+))?$")
 
 # heat.topic_tokens는 'of'/'to' 같은 두 글자 기능어를 통과시킨다 — 주 내 클러스터링
 # 에서는 무해하지만, 주차 간 대조에서는 이런 토큰이 겹침 수를 채워 전혀 다른 소식을
 # 묶는다 (실측: 'of/to' 2개 + 'claude'로 정렬 실패 기사가 사이버보안 기사와 매칭).
-_FUNCTION_WORDS = {"the", "and", "for", "with", "from", "our", "all", "its", "into", "how", "why", "new"}
+_FUNCTION_WORDS = {
+    "the", "and", "for", "with", "from", "our", "all", "its", "into", "how", "why",
+    "new", "your", "you", "his", "her", "they", "their", "this", "that", "what",
+}
+
+# 이력에서 이 수 이상의 서로 다른 과거 기사에 등장한 토큰은 '그 소식 고유'가 아니라
+# 분야 일반 어휘다 (실측: 'agent/harness'가 서로 다른 에이전트 기사들을 후속으로
+# 묶었다). 수동 불용어 목록 대신 이력 자체의 출현 빈도로 자기 조정한다.
+_COMMON_TOKEN_DF = 3
 
 
 def _story_tokens(*texts: str) -> set[str]:
@@ -69,6 +83,17 @@ class HistoryIndex:
     def __bool__(self) -> bool:
         return bool(self.entries)
 
+    @property
+    def common_tokens(self) -> set[str]:
+        """이력의 여러 기사에 걸쳐 나오는 분야 일반 토큰 — 겹침 계산에서 제외."""
+        if not hasattr(self, "_common_tokens"):
+            df: dict[str, int] = {}
+            for past in self.entries:
+                for token in past.tokens:
+                    df[token] = df.get(token, 0) + 1
+            self._common_tokens = {t for t, n in df.items() if n >= _COMMON_TOKEN_DF}
+        return self._common_tokens
+
     def match(self, article: RankedArticle) -> tuple[str, PastArticle] | None:
         """후보 기사를 이력과 대조해 (판정, 과거 기사)를 돌려준다. 무관하면 None."""
         url = (article.url or "").rstrip("/").lower()
@@ -79,12 +104,14 @@ class HistoryIndex:
             if url and url == past.url:
                 return ("repeat", past)
             ratio = SequenceMatcher(None, norm, past.normalized_title).ratio() if norm else 0.0
-            overlap = len(tokens & past.tokens)
+            overlap = len((tokens & past.tokens) - self.common_tokens)
             strong = ratio >= _TITLE_SIM_THRESHOLD or overlap >= _TOKEN_OVERLAP_STRONG
-            if not strong and overlap < _TOKEN_OVERLAP_WEAK:
+            weak = overlap >= _TOKEN_OVERLAP_WEAK and ratio >= _WEAK_RATIO_FLOOR
+            if not strong and not weak:
                 continue
+            publisher = article.publisher or publisher_of(article)
             same_outlet = bool(
-                (article.publisher or publisher_of(article)) == past.publisher
+                (publisher == past.publisher and publisher not in _PLATFORM_PUBLISHERS)
                 or (past.owner and owner_key_of(article) == past.owner)
             )
             if not same_outlet and not strong:
