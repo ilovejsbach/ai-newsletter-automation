@@ -1,6 +1,10 @@
 """뉴스레터 산출물을 정적 사이트(GitHub/GitLab Pages) 구조로 변환한다.
 
-사용법: uv run python scripts/build_site.py <산출물_폴더> <사이트_저장소_루트>
+사용법: uv run python scripts/build_site.py <산출물_폴더> <사이트_저장소_루트> [폴더명]
+
+[폴더명]을 주면 날짜 대신 그 이름의 폴더로 배포한다 (예: 2026-09-01-history).
+같은 주에 두 버전을 나란히 올려 비교할 때 쓴다 — 아카이브 목차에는 비교판으로
+표기되고, latest는 항상 날짜 폴더(정식판)만 가리킨다.
 
 내부망 깃랩은 외부 CDN이 안 되므로 모든 리소스를 저장소 안에서 서빙해야 한다:
 - Pretendard 폰트를 사이트 루트 /fonts 에 한 번 내려받아 공유하고,
@@ -43,11 +47,11 @@ EXTERNAL_RESOURCE_RE = re.compile(
 )
 
 
-def build_week(output_dir: Path, site_root: Path) -> Path:
+def build_week(output_dir: Path, site_root: Path, dest_name: str | None = None) -> Path:
     date_match = re.match(r"\d{4}-\d{2}-\d{2}", output_dir.name)
     if not date_match:
         sys.exit(f"산출물 폴더명에서 날짜를 찾을 수 없음: {output_dir.name}")
-    week = date_match.group(0)
+    week = dest_name or date_match.group(0)
     dest = site_root / week
     if dest.exists():
         shutil.rmtree(dest)
@@ -139,12 +143,25 @@ def _localize_remote_images(html: str, html_path: Path, week_dir: Path) -> str:
 
 
 def rebuild_indexes(site_root: Path) -> None:
-    weeks = sorted(
-        (d.name for d in site_root.iterdir() if d.is_dir() and re.match(r"\d{4}-\d{2}-\d{2}$", d.name)),
+    # 날짜 폴더가 정식판, '날짜-접미사' 폴더는 같은 주의 비교판이다.
+    all_dirs = sorted(
+        (
+            d.name
+            for d in site_root.iterdir()
+            if d.is_dir() and re.match(r"\d{4}-\d{2}-\d{2}(-[a-z0-9][a-z0-9-]*)?$", d.name)
+        ),
         reverse=True,
     )
+    weeks = [w for w in all_dirs if re.match(r"\d{4}-\d{2}-\d{2}$", w)]
+
+    def _label(name: str) -> str:
+        if name in weeks:
+            return f"{name} 주간 AI 뉴스레터"
+        base, suffix = name[:10], name[11:]
+        return f"{base} 주간 AI 뉴스레터 — 비교판 ({suffix})"
+
     items = "\n".join(
-        f'      <li><a href="{w}/">{w} 주간 AI 뉴스레터</a></li>' for w in weeks
+        f'      <li><a href="{w}/">{_label(w)}</a></li>' for w in all_dirs
     )
     (site_root / "index.html").write_text(f"""<!doctype html>
 <html lang="ko">
@@ -188,11 +205,14 @@ def validate(site_root: Path) -> int:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         sys.exit(__doc__)
     output_dir, site_root = Path(sys.argv[1]), Path(sys.argv[2])
+    dest_name = sys.argv[3] if len(sys.argv) == 4 else None
+    if dest_name and not re.match(r"\d{4}-\d{2}-\d{2}(-[a-z0-9][a-z0-9-]*)?$", dest_name):
+        sys.exit(f"폴더명은 'YYYY-MM-DD' 또는 'YYYY-MM-DD-접미사' 형식이어야 함: {dest_name}")
     site_root.mkdir(parents=True, exist_ok=True)
-    dest = build_week(output_dir, site_root)
+    dest = build_week(output_dir, site_root, dest_name)
     rebuild_indexes(site_root)
     bad = validate(site_root)
     print(f"생성: {dest}")

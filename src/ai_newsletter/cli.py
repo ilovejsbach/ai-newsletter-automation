@@ -155,7 +155,7 @@ def build(
     history: bool = typer.Option(
         False,
         "--history/--no-history",
-        help="주차 간 이력 참조 (heat 모드 전용, 기본 꺼짐 — 끄면 기존 선정 동작과 동일). "
+        help="주차 간 이력 참조 (sectioned/heat 모드, 기본 꺼짐 — 끄면 기존 선정 동작과 동일). "
         "지난 호 selected_articles.json과 대조해 같은 URL 재탕 -30점, 같은 발행사의 "
         "유사 재탕 -20점을 주고, 후속 보도에는 감점 없이 '지난 호 후속' 표시를 붙인다. "
         "판정 전부가 generation_report.json의 history 항목에 남는다.",
@@ -229,9 +229,9 @@ def _run_build(
     usage.reset()
     t0 = time.monotonic()
     load_environment(env_file)
-    if history and selection_mode != "heat":
+    if history and selection_mode not in ("sectioned", "heat"):
         console.print(
-            f"[yellow]--history는 heat 모드 전용이라 무시됩니다 (현재: {selection_mode}).[/yellow]"
+            f"[yellow]--history는 sectioned/heat 모드 전용이라 무시됩니다 (현재: {selection_mode}).[/yellow]"
         )
     source_list = load_sources(sources)
     all_sources = list(source_list.sources)
@@ -355,15 +355,7 @@ def _run_build(
         selected, report = select_consensus_articles(
             candidates, limit=limit, use_llm=use_llm, source_sets=source_sets
         )
-    elif selection_mode == "sectioned":
-        selected, report = select_sectioned_articles(
-            candidates,
-            limit=limit,
-            use_llm=use_llm,
-            social_articles=social_candidates,
-            rubric=rubric,
-        )
-    elif selection_mode == "heat":
+    elif selection_mode in ("sectioned", "heat"):
         history_index = None
         if history:
             from .history import load_history
@@ -376,7 +368,8 @@ def _run_build(
                 )
             else:
                 console.print("[dim]이력 참조: 과거 주차 산출물이 없어 대조 없이 진행[/dim]")
-        selected, report = select_heat_articles(
+        select_fn = select_sectioned_articles if selection_mode == "sectioned" else select_heat_articles
+        selected, report = select_fn(
             candidates,
             limit=limit,
             use_llm=use_llm,

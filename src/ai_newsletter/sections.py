@@ -19,6 +19,7 @@ import math
 import os
 import re
 
+from .history import HistoryIndex, apply_history
 from .models import Article, RankedArticle
 from .editorial_selection import (
     _BIG_LABS,
@@ -117,6 +118,7 @@ def select_sectioned_articles(
     per_source_limit: int = 2,
     social_articles: list[Article] | None = None,
     rubric: str = "standard",
+    history: "HistoryIndex | None" = None,
 ) -> tuple[list[RankedArticle], dict[str, object]]:
     pool = [a for a in deduplicate(candidates) if _is_publishable(a)]
     mode = "sectioned-heuristic"
@@ -184,6 +186,13 @@ def select_sectioned_articles(
             social_matched += 1
         ranked.sort(key=lambda a: a.score, reverse=True)
 
+    # 주차 간 이력(--history): 쿼터가 보기 전에 재탕을 감점하고 후속을 표시한다.
+    # history가 None이면(기본) 아무 것도 하지 않아 기존 동작과 동일하다.
+    history_hits: list[dict[str, object]] = []
+    if history:
+        history_hits = apply_history(ranked, history)
+        ranked.sort(key=lambda a: a.score, reverse=True)
+
     quotas = section_quotas(limit)
     selected, shortfalls = _fill_quotas(
         ranked, limit=limit, quotas=quotas, per_source_limit=per_source_limit
@@ -217,6 +226,7 @@ def select_sectioned_articles(
             "boosted_articles": social_matched,
         },
         "completeness_promotions": critic_notes,
+        **({"history": {"weeks": history.weeks, "hits": history_hits}} if history is not None else {}),
         # 낙선 이유 추적용: 상위 25위까지 전체 순위 (selected=False가 탈락자)
         "ranking": [
             {

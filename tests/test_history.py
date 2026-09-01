@@ -45,6 +45,7 @@ def _candidate(
         if published
         else None,
         score=score,
+        summary="선정 필터(_is_publishable)를 통과할 만큼 충분히 긴 요약 문장. " * 4,
     )
 
 
@@ -139,6 +140,26 @@ def test_weak_cross_publisher_overlap_is_ignored(tmp_path: Path) -> None:
     assert apply_history([article], index) == []
     assert article.followup_of == ""
     assert article.score == 60.0
+
+
+def test_sectioned_selection_accepts_history(tmp_path: Path) -> None:
+    """기본 운영 모드(sectioned)에서도 history가 점수에 반영되는지 확인한다."""
+    from ai_newsletter.models import Article
+    from ai_newsletter.sections import select_sectioned_articles
+
+    _write_week(tmp_path, "2026-08-25", [_past_row("https://a.com/story", "Big launch")])
+    index = load_history(tmp_path, weeks=4, before=date(2026, 9, 1))
+    # 선정 입력은 (RankedArticle이 아닌) 순수 Article 후보다.
+    repeat = Article(**_candidate("https://a.com/story", "Big launch", published="2026-08-20T00:00:00").model_dump(exclude={"score", "score_breakdown"}, include=set(Article.model_fields)))
+    fresh = Article(**_candidate("https://c.com/new", "Fresh different quantum paper", published="2026-08-30T00:00:00").model_dump(include=set(Article.model_fields)))
+
+    selected, report = select_sectioned_articles(
+        [repeat, fresh], limit=2, use_llm=False, history=index
+    )
+    assert report["history"]["hits"][0]["kind"] == "repeat"
+    # history=None(기본)이면 보고서에 history 항목 자체가 없다 — 기존 동작 유지.
+    _, report2 = select_sectioned_articles([repeat, fresh], limit=2, use_llm=False)
+    assert "history" not in report2
 
 
 def test_unrelated_article_is_untouched(tmp_path: Path) -> None:

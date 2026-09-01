@@ -30,7 +30,7 @@ uv run ai-newsletter                 # 하위 명령 없이 실행하면 대화�
 uv run ai-newsletter sample
 uv run ai-newsletter build --days 7 --limit 10   # 기본: sectioned 모드 + 소셜 신호 + editorial 테마 + 썸네일 + PNG
 uv run ai-newsletter build --days 7 --limit 10 --env-file /Users/koscom/workspace/koscom_report/.env
-uv run ai-newsletter build --history             # 주차 간 이력 참조(옵트인): 지난 호 재탕 감점 + 후속 보도 표시 (heat 모드 전용)
+uv run ai-newsletter build --history             # 주차 간 이력 참조(옵트인): 지난 호 재탕 감점 + 후속 보도 표시 (sectioned/heat 모드)
 ```
 
 기본 `build`는 OpenAI를 사용해 한국어 뉴스레터로 편집합니다. `.env`에 `OPENAI_API_KEY`를 설정하거나, 위 예시처럼 `koscom_report`의 `.env`를 `--env-file`로 지정합니다. LLM 없이 휴리스틱 결과만 보고 싶으면 `--no-use-llm`을 붙입니다.
