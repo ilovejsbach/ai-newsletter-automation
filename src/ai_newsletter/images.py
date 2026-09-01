@@ -80,17 +80,26 @@ def capture_article_images(
     # Phase 1 (parallel): each article's OWN image. og:image download, else a
     # screenshot of its own page (rejected if blank / bot-challenge). Independent
     # per article, so it is safe to run concurrently.
+    # On rerender, assets that already exist on disk are kept as-is: a refetch
+    # can only downgrade them (the source page may now serve a bot challenge,
+    # and a generated illustration can never be refetched).
     def _own(item: tuple[int, RankedArticle]) -> None:
         idx, article = item
-        url = _download_image_urls(article.image_urls, idx, article, image_dir)
-        if url:
-            _remember(url)
-        elif chrome:
-            _screenshot_for(chrome, article.url, idx, article, image_dir)
+        hero_exists = bool(article.local_image) and (output_dir / article.local_image).exists()
+        if not hero_exists:
+            article.local_image = ""  # stale reference — let phase 2 regenerate if needed
+            url = _download_image_urls(article.image_urls, idx, article, image_dir)
+            if url:
+                _remember(url)
+            elif chrome:
+                _screenshot_for(chrome, article.url, idx, article, image_dir)
         # Info images (charts/tables) are independent of the representative
         # image outcome above — download them regardless of whether the hero
         # came from a URL or a screenshot fallback.
-        if article.info_image_urls:
+        info_exists = bool(article.local_info_images) and all(
+            (output_dir / p).exists() for p in article.local_info_images
+        )
+        if article.info_image_urls and not info_exists:
             _download_info_images(article.info_image_urls, idx, article, image_dir)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -241,15 +250,18 @@ def _download_info_images(
 def _screenshot_for(
     chrome: str, url: str, idx: int, article: RankedArticle, image_dir: Path
 ) -> bool:
+    # Capture into a temp file and promote only after validation, so a blank or
+    # bot-challenge capture never clobbers an image that already exists at the
+    # final path (this destroyed a generated hero on rerender before).
     target = (image_dir / f"article_{idx:02d}_{article.id}.png").resolve()
-    if not _capture_with_chrome(chrome, url, target):
-        return False
-    if target.exists() and target.stat().st_size >= _MIN_MEANINGFUL_SHOT_BYTES:
+    tmp = target.with_name(f"{target.stem}.capture_tmp.png")
+    ok = _capture_with_chrome(chrome, url, tmp)
+    if ok and tmp.exists() and tmp.stat().st_size >= _MIN_MEANINGFUL_SHOT_BYTES:
+        tmp.replace(target)
         article.local_image = f"assets/images/{target.name}"
         return True
-    # Drop blank/challenge captures so they are not referenced as an "image".
     try:
-        target.unlink()
+        tmp.unlink(missing_ok=True)
     except OSError:
         pass
     return False
