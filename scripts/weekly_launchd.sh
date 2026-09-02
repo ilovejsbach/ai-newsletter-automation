@@ -13,9 +13,9 @@ LOG="$LOG_DIR/$(date +%Y-%m-%d).log"
 {
   echo "===== 주간 자동 실행 시작: $(date) ====="
   claude -p "/weekly-run" --permission-mode acceptEdits
-  status=$?
-  echo "===== 종료 (exit $status): $(date) ====="
-  if [[ $status -ne 0 ]]; then
+  rc=$?   # zsh에서 'status'는 예약 변수라 쓸 수 없다
+  echo "===== 종료 (exit $rc): $(date) ====="
+  if [[ $rc -ne 0 ]]; then
     osascript -e 'display notification "주간 실행 실패 — 로그를 확인하세요" with title "AI 뉴스레터 자동화"' || true
   fi
 } >> "$LOG" 2>&1

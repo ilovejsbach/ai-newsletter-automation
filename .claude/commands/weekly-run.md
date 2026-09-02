@@ -28,8 +28,11 @@ description: 화요일 주간 뉴스레터 자동 실행 런북 (빌드 → 판�
   잘못 붙지 않았으면) 수정 없이 요약에만 기록한다.
 
 수정을 했다면 `uv run ai-newsletter rerender <산출폴더>`로 재렌더링한다
-(이미지는 이미 존재하면 다시 받지 않으므로 안전하다). 수정 후 이미지 파일들이
-변하지 않았는지 확인한다.
+(이미지는 이미 존재하면 다시 받지 않으므로 안전하다). 이미지 보존 확인과 원문
+대조에는 보조 스크립트를 쓴다: 수정 전에
+`uv run python scripts/gate_inspect.py <산출폴더> snapshot`, 재렌더링 후
+`uv run python scripts/gate_inspect.py <산출폴더> diff` (변경 0건이어야 한다),
+원문 확인은 `uv run python scripts/gate_inspect.py <산출폴더> article <N>`.
 
 ## 3. 배포와 릴리스
 
