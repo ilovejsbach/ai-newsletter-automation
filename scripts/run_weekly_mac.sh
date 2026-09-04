@@ -9,17 +9,18 @@
 # 판단이 필요한 일(근거 플래그 원문 대조, 문체 윤문)은 이 스크립트가 하지 않는다 —
 # .claude/commands/weekly-run.md 런북이 build와 publish 사이에서 Claude로 수행한다.
 #
-# 트랙 전환: TRACK=history(기본)는 --history 빌드를 <주차>-history 비교판으로
-# 배포·릴리스(--latest 아님)한다. 자동화 검증이 끝나면 TRACK=official로 바꾸면
-# 정식 폴더·정식 릴리스·고정 주소(newsletter_delta.zip)까지 담당하게 된다.
+# 트랙: official(기본)은 --history를 적용한 빌드를 정식 주차 폴더로 배포하고
+# 정식 릴리스(--latest, 고정명 newsletter_delta.zip 포함)를 올린다.
+# 2026-09-04 사용자 결정: 이력 적용 버전이 곧 정식 버전 — 비교판 운영 종료.
+# TRACK=history는 <주차>-history 비교판 배포용으로 남겨 둔 실험 모드다.
 
 set -euo pipefail
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 REPO="$HOME/workspace/ai-newsletter-automation"
 SITE="$HOME/workspace/ai-newsletter-site"
-TRACK="${TRACK:-history}"                 # history(테스트) | official(정식)
-OFFICIAL_USES_HISTORY="${OFFICIAL_USES_HISTORY:-0}"  # --history 정식 채택 시 1로
+TRACK="${TRACK:-official}"                # official(정식, 기본) | history(실험용 비교판)
+OFFICIAL_USES_HISTORY="${OFFICIAL_USES_HISTORY:-1}"  # 정식 빌드에 --history 적용
 MAX_ZIP_MB=20
 
 WEEK="$(date +%Y-%m-%d)"
